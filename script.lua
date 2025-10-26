@@ -186,7 +186,7 @@ local function runAntiLag()
         "fruit", "fruits", "berry", "berries",
         
         -- New additions
-        "daisy", "cactus", "forrest", "bamboo", "bear",
+        "daisy", "cactus", "forrest", "bamboo", "rock",
         "leader", "cave", "crystal"
     }
 
