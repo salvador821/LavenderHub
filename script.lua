@@ -1,4 +1,4 @@
---// Lavender Hub - PART 1 \\--
+--// Lavender Hub - PART 1 (OPTIMIZED) \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,10 +11,7 @@ local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local GRID_SIZE = 6
-local JUMP_HEIGHT = 150
-local CHECK_INTERVAL = 0.1
-local OBSTACLE_CHECK_DISTANCE = 5
-local MOVETO_TIMEOUT = 5
+local CHECK_INTERVAL = 0.2 -- Increased to reduce lag
 local TOKEN_CLEAR_INTERVAL = 5
 local HIVE_CHECK_INTERVAL = 10
 
@@ -65,13 +62,16 @@ local toggles = {
     visitedTokens = {},
     lastTokenClearTime = tick(),
     lastHiveCheckTime = tick(),
-    lastRandomMoveTime = tick(),
     
     -- Pollen tracking
     lastPollenValue = 0,
     lastPollenChangeTime = 0,
     fieldArrivalTime = 0,
-    hasCollectedPollen = false
+    hasCollectedPollen = false,
+    
+    -- Movement optimization
+    isMoving = false,
+    currentTarget = nil
 }
 
 local player = Players.LocalPlayer
@@ -82,12 +82,11 @@ local digRunning = false
 
 -- Console System
 local consoleLogs = {}
-local maxConsoleLines = 50
+local maxConsoleLines = 30 -- Reduced to improve performance
 local consoleLabel = nil
 
 -- Auto-Save System
 local saveData = {}
-local SAVE_KEY = "LavenderHub_Settings"
 
 local function addToConsole(message)
     local timestamp = os.date("%H:%M:%S")
@@ -100,7 +99,7 @@ local function addToConsole(message)
         table.remove(consoleLogs, 1)
     end
     
-    -- Update console display if it exists
+    -- Update console display if it exists (with debounce)
     if consoleLabel then
         consoleLabel:SetText(table.concat(consoleLogs, "\n"))
     end
@@ -125,10 +124,7 @@ local function saveSettings()
     if success then
         pcall(function()
             writefile("LavenderHub_Settings.txt", encoded)
-            addToConsole("💾 Settings saved successfully")
         end)
-    else
-        addToConsole("❌ Failed to save settings")
     end
 end
 
@@ -140,7 +136,6 @@ local function loadSettings()
     if success and content then
         local decoded = HttpService:JSONDecode(content)
         if decoded then
-            -- Apply loaded settings
             toggles.field = decoded.field or toggles.field
             toggles.movementMethod = decoded.movementMethod or toggles.movementMethod
             toggles.autoFarm = decoded.autoFarm or toggles.autoFarm
@@ -148,77 +143,75 @@ local function loadSettings()
             toggles.tweenSpeed = decoded.tweenSpeed or toggles.tweenSpeed
             toggles.walkspeedEnabled = decoded.walkspeedEnabled or toggles.walkspeedEnabled
             toggles.walkspeed = decoded.walkspeed or toggles.walkspeed
-            
-            addToConsole("💾 Settings loaded successfully")
             return true
         end
     end
-    addToConsole("📝 No saved settings found, using defaults")
     return false
 end
 
--- Random Movement Functions
+-- Optimized Movement Functions
 local function getRandomPositionInField()
     local fieldPos = fieldCoords[toggles.field]
     if not fieldPos then return nil end
     
-    -- Define field boundaries (adjust these values based on field size)
-    local fieldRadius = 50
+    -- Smaller movement radius for continuous movement
+    local fieldRadius = 25
     local randomX = fieldPos.X + math.random(-fieldRadius, fieldRadius)
     local randomZ = fieldPos.Z + math.random(-fieldRadius, fieldRadius)
-    
-    -- Keep Y position similar to field
     local randomY = fieldPos.Y
     
     return Vector3.new(randomX, randomY, randomZ)
 end
 
-local function performRandomMovement()
-    if not toggles.atField or toggles.isConverting then return end
+local function performContinuousMovement()
+    if not toggles.atField or toggles.isConverting or toggles.isMoving then return end
     
     local randomPos = getRandomPositionInField()
     if randomPos then
+        toggles.isMoving = true
+        toggles.currentTarget = randomPos
+        
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(randomPos)
-            addToConsole("🎲 Moving to random position in field")
+            -- Don't wait for completion - let it move continuously
+            spawn(function()
+                task.wait(2) -- Move for 2 seconds then find new target
+                toggles.isMoving = false
+                toggles.currentTarget = nil
+            end)
+        else
+            toggles.isMoving = false
+            toggles.currentTarget = nil
         end
     end
 end
 
-local function shouldDoRandomMove()
-    -- Do random movement every 10-20 seconds when no tokens are nearby
-    return tick() - toggles.lastRandomMoveTime >= math.random(10, 20)
-end
-
--- Utility Functions
+-- Utility Functions (Optimized)
 local function GetCharacter()
     return player.Character or player.CharacterAdded:Wait()
-end
-
-local function LightWait(duration)
-    local start = tick()
-    while tick() - start < duration do
-        RunService.Heartbeat:Wait()
-    end
 end
 
 local function SafeCall(func, name)
     local success, err = pcall(func)
     if not success then
-        addToConsole("❌ Error in " .. (name or "unknown") .. ": " .. err)
+        -- Only log critical errors to reduce spam
+        if not name or not name:find("DigLoop") then
+            addToConsole("❌ Error in " .. (name or "unknown") .. ": " .. err)
+        end
     end
     return success
 end
 
 local function formatNumber(num)
-    local suffixes = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qad", "Qid"}
+    if num < 1000 then return tostring(math.floor(num)) end
+    local suffixes = {"K", "M", "B", "T"}
     local i = 1
     while num >= 1000 and i < #suffixes do
         num = num / 1000
         i = i + 1
     end
-    return i == 1 and tostring(num) or string.format("%.1f%s", num, suffixes[i])
+    return string.format("%.1f%s", num, suffixes[i])
 end
 
 -- Get current pollen value
@@ -252,13 +245,13 @@ local function checkHiveOwnership()
         ownedHive = getOwnedHive()
         
         if ownedHive and ownedHive ~= previousHive then
-            addToConsole("🎯 New hive detected: " .. ownedHive)
+            addToConsole("🎯 New hive: " .. ownedHive)
             displayHiveName = "Hive"
         elseif not ownedHive and previousHive then
-            addToConsole("❌ Hive ownership lost")
+            addToConsole("❌ Hive lost")
             displayHiveName = "None"
         elseif ownedHive and previousHive == nil then
-            addToConsole("🎯 Hive ownership acquired: " .. ownedHive)
+            addToConsole("🎯 Hive acquired: " .. ownedHive)
             displayHiveName = "Hive"
         end
         
@@ -266,7 +259,7 @@ local function checkHiveOwnership()
     end
 end
 
--- Movement Functions
+-- Movement Functions (Optimized)
 local function moveToPositionTween(targetPos)
     local character = player.Character
     local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -299,31 +292,8 @@ local function moveToPositionWalk(targetPos)
     local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not humanoid or not humanoidRootPart then return false end
     
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        WaypointSpacing = GRID_SIZE
-    })
-    
-    local success, errorMessage = pcall(function()
-        path:ComputeAsync(humanoidRootPart.Position, targetPos)
-    end)
-    
-    if not success or path.Status ~= Enum.PathStatus.Success then
-        humanoid:MoveTo(targetPos)
-        humanoid.MoveToFinished:Wait(10)
-        return true
-    end
-    
-    local waypoints = path:GetWaypoints()
-    for _, waypoint in ipairs(waypoints) do
-        humanoid:MoveTo(waypoint.Position)
-        if waypoint.Action == Enum.PathWaypointAction.Jump then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-        humanoid.MoveToFinished:Wait(5)
-    end
+    humanoid:MoveTo(targetPos)
+    humanoid.MoveToFinished:Wait(8) -- Reduced timeout
     
     return true
 end
@@ -336,7 +306,7 @@ local function moveToPosition(targetPos)
     end
 end
 
--- Auto-dig function
+-- Auto-dig function (Optimized)
 local function DigLoop()
     if digRunning then return end
     digRunning = true
@@ -347,7 +317,7 @@ local function DigLoop()
             local toolsFired = 0
             
             for _, tool in pairs(char:GetChildren()) do
-                if toolsFired >= 10 then break end
+                if toolsFired >= 5 then break end -- Reduced tool usage
                 if tool:IsA("Tool") then
                     local remote = tool:FindFirstChild("ToolRemote") or tool:FindFirstChild("Remote")
                     if remote then
@@ -357,54 +327,46 @@ local function DigLoop()
                 end
             end
             
-            LightWait(0.15)
-        end, "DigLoop Cycle")
+            task.wait(0.2) -- Reduced frequency
+        end, "DigLoop")
     end
     
     digRunning = false
 end
 
--- Token Collection
+-- Token Collection (Optimized)
 local function getNearestToken()
-    local closestToken = nil
-    local shortestDistance = math.huge
-
     local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
     if not tokensFolder then return nil end
 
     for _, token in pairs(tokensFolder:GetChildren()) do
         if token:IsA("BasePart") and token:FindFirstChild("Token") and token:FindFirstChild("Collecting") and not token.Collecting.Value then
             local distance = (token.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            if distance < shortestDistance and not toggles.visitedTokens[token] then
-                shortestDistance = distance
-                closestToken = token
+            if distance <= 30 and not toggles.visitedTokens[token] then -- Reduced distance
+                return token, distance
             end
         end
     end
-
-    return closestToken, shortestDistance
+    return nil
 end
 
 local function areTokensNearby()
-    local token, distance = getNearestToken()
-    return token ~= nil and distance <= 50
+    local token = getNearestToken()
+    return token ~= nil
 end
 
 local function collectTokens()
     if not toggles.autoFarm or toggles.isConverting or not toggles.atField then return end
     
-    local token, dist = getNearestToken()
-    if token and dist <= 50 then
+    local token = getNearestToken()
+    if token then
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(token.Position)
             local startTime = tick()
-            while (player.Character.HumanoidRootPart.Position - token.Position).Magnitude > 4 and tick() - startTime < 5 do
-                if not token.Parent then
-                    toggles.visitedTokens[token] = nil
-                    break
-                end
-                RunService.Heartbeat:Wait()
+            while (player.Character.HumanoidRootPart.Position - token.Position).Magnitude > 4 and tick() - startTime < 3 do
+                if not token.Parent then break end
+                task.wait()
             end
             if token.Parent and (player.Character.HumanoidRootPart.Position - token.Position).Magnitude <= 4 then
                 toggles.visitedTokens[token] = true
@@ -419,7 +381,6 @@ local function updatePollenTracking()
     
     local currentPollen = getCurrentPollen()
     
-    -- Track if we've collected any pollen at all
     if currentPollen > 0 and not toggles.hasCollectedPollen then
         toggles.hasCollectedPollen = true
     end
@@ -436,7 +397,6 @@ local function shouldConvertToHive()
     local currentPollen = getCurrentPollen()
     local timeSinceLastChange = tick() - toggles.lastPollenChangeTime
     
-    -- Only convert if we've collected pollen AND it's stagnant for 5 seconds
     return toggles.hasCollectedPollen and (timeSinceLastChange >= 5 or currentPollen == 0)
 end
 
@@ -446,14 +406,11 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Lavender Hub - PART 2 \\--
+--// Lavender Hub - PART 2 (OPTIMIZED) \\--
 
 -- Farming Logic
 local function startFarming()
-    if not toggles.autoFarm or toggles.isFarming or not ownedHive then 
-        addToConsole("❌ Cannot start farming - check hive ownership")
-        return 
-    end
+    if not toggles.autoFarm or toggles.isFarming or not ownedHive then return end
     
     local fieldPos = fieldCoords[toggles.field]
     if not fieldPos then return end
@@ -462,15 +419,15 @@ local function startFarming()
     toggles.isConverting = false
     toggles.atField = false
     toggles.atHive = false
+    toggles.isMoving = false
     
-    -- Reset pollen tracking completely
+    -- Reset pollen tracking
     toggles.lastPollenValue = getCurrentPollen()
     toggles.lastPollenChangeTime = tick()
     toggles.fieldArrivalTime = tick()
     toggles.hasCollectedPollen = false
-    toggles.lastRandomMoveTime = tick() -- Reset random movement timer
     
-    addToConsole("🚶 Moving to field: " .. toggles.field)
+    addToConsole("Moving to: " .. toggles.field)
     
     -- Move to field
     if moveToPosition(fieldPos) then
@@ -481,14 +438,13 @@ local function startFarming()
         toggles.fieldArrivalTime = tick()
         toggles.hasCollectedPollen = (initialPollen > 0)
         
-        addToConsole("🎯 Arrived at " .. toggles.field)
+        addToConsole("Arrived at field")
         
         -- Start auto-dig if enabled
         if toggles.autoDig then
-            coroutine.wrap(DigLoop)()
+            spawn(DigLoop)
         end
     else
-        addToConsole("❌ Failed to move to field")
         toggles.isFarming = false
     end
 end
@@ -503,15 +459,15 @@ local function startConverting()
     toggles.isConverting = true
     toggles.atField = false
     toggles.atHive = false
+    toggles.isMoving = false
     
-    addToConsole("🚶 Moving to hive for conversion")
+    addToConsole("Moving to hive")
     
     -- Move to hive
     if moveToPosition(hivePos) then
         toggles.atHive = true
-        addToConsole("🏠 Arrived at hive")
+        addToConsole("At hive")
         
-        -- Wait 2 seconds then start conversion
         task.wait(2)
         
         -- Start honey making
@@ -519,43 +475,46 @@ local function startConverting()
         local makeHoneyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MakeHoney")
         if makeHoneyRemote then
             makeHoneyRemote:FireServer(unpack(args))
-            addToConsole("🍯 Started honey conversion")
+            addToConsole("Converting honey")
         end
     else
-        addToConsole("❌ Failed to move to hive")
         toggles.isConverting = false
     end
 end
 
--- Main Loop
+-- Main Loop (Optimized)
+local lastUpdateTime = 0
 local function updateFarmState()
     if not toggles.autoFarm then return end
+    
+    local currentTime = tick()
+    if currentTime - lastUpdateTime < CHECK_INTERVAL then return end
+    lastUpdateTime = currentTime
     
     -- Check hive ownership periodically
     checkHiveOwnership()
     
-    -- Update pollen tracking (only tracks when at field)
+    -- Update pollen tracking
     updatePollenTracking()
     
-    -- Check if we should transition between states
+    -- State transitions
     if toggles.isFarming and toggles.atField then
         if shouldConvertToHive() then
-            addToConsole("🔄 Converting to honey")
+            addToConsole("Converting to honey")
             startConverting()
         else
-            -- Collect tokens while farming
+            -- Always try to collect tokens first
             collectTokens()
             
-            -- Do random movement if no tokens nearby and it's time
-            if not areTokensNearby() and shouldDoRandomMove() then
-                performRandomMovement()
-                toggles.lastRandomMoveTime = tick()
+            -- Continuous movement when not collecting tokens
+            if not toggles.isMoving and not areTokensNearby() then
+                performContinuousMovement()
             end
         end
         
     elseif toggles.isConverting and toggles.atHive then
         if shouldReturnToField() then
-            addToConsole("✅ Returning to field")
+            addToConsole("Returning to field")
             startFarming()
         end
     end
@@ -590,26 +549,25 @@ local Window = Library:CreateWindow({
     Center = true,
     AutoShow = true,
     ShowCustomCursor = false,
-    Size = UDim2.fromOffset(720, 500),
+    Size = UDim2.fromOffset(600, 450), -- Smaller window
     Resizable = false
 })
 
 -- Home Tab
 local HomeTab = Window:AddTab("Home", "house")
 local HomeLeftGroupbox = HomeTab:AddLeftGroupbox("Stats")
-local WrappedLabel = HomeLeftGroupbox:AddLabel({ Text = "Waiting for data...", DoesWrap = true })
+local WrappedLabel = HomeLeftGroupbox:AddLabel({ Text = "Loading...", DoesWrap = true })
 
 -- Farming Tab
 local MainTab = Window:AddTab("Farming", "shovel")
 
 -- Farming Settings
-local FarmingGroupbox = MainTab:AddLeftGroupbox("Farming Settings")
+local FarmingGroupbox = MainTab:AddLeftGroupbox("Farming")
 local FieldDropdown = FarmingGroupbox:AddDropdown("FieldDropdown", {
     Values = {"Mango Field", "Blueberry Field", "Daisy Field", "Cactus Field", "Strawberry Field", "Apple Field", "Lemon Field", "Grape Field", "Watermelon Field", "Forest Field", "Pear Field", "Mushroom Field", "Clover Field", "Bamboo Field", "Glitch Field", "Cave Field", "Mountain Field"},
     Default = 1,
     Multi = false,
     Text = "Field",
-    Tooltip = "Select field to farm",
     Callback = function(Value)
         toggles.field = Value
         saveSettings()
@@ -619,7 +577,6 @@ local FieldDropdown = FarmingGroupbox:AddDropdown("FieldDropdown", {
 local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
     Text = "Auto Farm",
     Default = false,
-    Tooltip = "Start automated farming",
     Callback = function(Value)
         toggles.autoFarm = Value
         saveSettings()
@@ -630,6 +587,7 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
             toggles.isConverting = false
             toggles.atField = false
             toggles.atHive = false
+            toggles.isMoving = false
         end
     end
 })
@@ -637,24 +595,19 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
 local AutoDigToggle = FarmingGroupbox:AddToggle("AutoDigToggle", {
     Text = "Auto Dig",
     Default = false,
-    Tooltip = "Automatically use tools to collect pollen",
     Callback = function(Value)
         toggles.autoDig = Value
         saveSettings()
-        if Value and toggles.atField and not toggles.isConverting then
-            coroutine.wrap(DigLoop)()
-        end
     end
 })
 
 -- Movement Settings
-local MovementGroupbox = MainTab:AddRightGroupbox("Movement Settings")
+local MovementGroupbox = MainTab:AddRightGroupbox("Movement")
 local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
     Values = {"Walk", "Tween"},
     Default = 1,
     Multi = false,
-    Text = "Movement Method",
-    Tooltip = "How to move between locations",
+    Text = "Method",
     Callback = function(Value)
         toggles.movementMethod = Value
         saveSettings()
@@ -667,8 +620,7 @@ local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
     Min = 1,
     Max = 12,
     Rounding = 1,
-    Compact = false,
-    Tooltip = "Tween movement speed (higher = faster)",
+    Compact = true,
     Callback = function(Value)
         toggles.tweenSpeed = Value
         saveSettings()
@@ -676,11 +628,10 @@ local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
 })
 
 -- Player Settings
-local PlayerGroupbox = MainTab:AddLeftGroupbox("Player Settings")
+local PlayerGroupbox = MainTab:AddLeftGroupbox("Player")
 local WalkspeedToggle = PlayerGroupbox:AddToggle("WalkspeedToggle", {
-    Text = "Enable Walkspeed",
+    Text = "Walkspeed",
     Default = false,
-    Tooltip = "Enable custom walkspeed",
     Callback = function(Value)
         toggles.walkspeedEnabled = Value
         saveSettings()
@@ -692,13 +643,12 @@ local WalkspeedToggle = PlayerGroupbox:AddToggle("WalkspeedToggle", {
 })
 
 local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
-    Text = "Walkspeed",
+    Text = "Speed",
     Default = 50,
     Min = 16,
     Max = 100,
     Rounding = 1,
-    Compact = false,
-    Tooltip = "Player walkspeed",
+    Compact = true,
     Callback = function(Value)
         toggles.walkspeed = Value
         saveSettings()
@@ -708,7 +658,7 @@ local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.2 - Console Ready", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.2 - Ready", DoesWrap = true })
 
 -- Status Groupbox
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
@@ -731,8 +681,13 @@ player.Idled:Connect(function()
     VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
 end)
 
--- Main Loops
+-- Optimized Main Loops
+local lastHeartbeatTime = 0
 RunService.Heartbeat:Connect(function()
+    local currentTime = tick()
+    if currentTime - lastHeartbeatTime < 0.1 then return end -- Throttle updates
+    lastHeartbeatTime = currentTime
+    
     updateFarmState()
     updateWalkspeed()
     clearVisitedTokens()
@@ -743,9 +698,9 @@ RunService.Heartbeat:Connect(function()
     
     if toggles.autoFarm then
         if toggles.isFarming and toggles.atField then
-            statusText = "Farming at " .. toggles.field
+            statusText = "Farming"
         elseif toggles.isConverting and toggles.atHive then
-            statusText = "Converting at Hive"
+            statusText = "Converting"
         elseif toggles.isFarming then
             statusText = "Moving to Field"
         elseif toggles.isConverting then
@@ -757,13 +712,14 @@ RunService.Heartbeat:Connect(function()
     PollenLabel:SetText("Pollen: " .. formatNumber(currentPollen))
 end)
 
--- Stats Update Loop
-coroutine.wrap(function()
-    while task.wait(0.5) do
+-- Stats Update Loop (Optimized)
+local lastStatsUpdate = 0
+spawn(function()
+    while task.wait(1) do -- Reduced update frequency
         local currentPollen = getCurrentPollen()
         
         WrappedLabel:SetText(string.format(
-            "Pollen 🌸: %s\nField: %s\nOwned Hive: %s\nMovement: %s\nAuto Dig: %s",
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s",
             formatNumber(currentPollen),
             toggles.field,
             displayHiveName,
@@ -771,7 +727,7 @@ coroutine.wrap(function()
             toggles.autoDig and "ON" or "OFF"
         ))
     end
-end)()
+end)
 
 -- Load settings on startup
 loadSettings()
@@ -786,12 +742,11 @@ WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
 -- Initial console message
-addToConsole("🎯 Lavender Hub v0.2 loaded successfully!")
-addToConsole("💾 Auto-save system enabled")
-addToConsole("🎲 Random movement system enabled")
-addToConsole("🔍 Hive detection active - checking every 10 seconds")
+addToConsole("Lavender Hub v0.2 loaded")
+addToConsole("Auto-save enabled")
+addToConsole("Continuous movement enabled")
 if ownedHive then
-    addToConsole("🏠 Initial hive detected: " .. ownedHive)
+    addToConsole("Hive: " .. ownedHive)
 else
-    addToConsole("❌ No hive owned yet - waiting for hive acquisition...")
+    addToConsole("No hive detected")
 end
