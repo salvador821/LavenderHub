@@ -1,4 +1,4 @@
---// Bee Swarm Simulator Farm Bot - PART 1 \\--
+--// Bee Swarm Simulator Farm Bot - PART 1 (FIXED) \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -65,10 +65,11 @@ local toggles = {
     lastTokenClearTime = tick(),
     lastHiveCheckTime = tick(),
     
-    -- Pollen tracking - FIXED: Initialize properly
-    lastPollenValue = -1, -- Start with -1 to ensure first update triggers change
+    -- Pollen tracking - FIXED: Proper initialization
+    lastPollenValue = 0,
     lastPollenChangeTime = 0,
-    fieldArrivalTime = 0
+    fieldArrivalTime = 0,
+    hasCollectedPollen = false -- NEW: Track if we've collected any pollen at all
 }
 
 local player = Players.LocalPlayer
@@ -294,21 +295,21 @@ local function collectTokens()
     end
 end
 
--- Pollen Tracking - FIXED: Proper initialization and tracking
+-- Pollen Tracking - FIXED: Better logic
 local function updatePollenTracking()
     if not toggles.atField then return end
     
     local currentPollen = getCurrentPollen()
     
-    -- FIX: Always update on first check at field, then track changes
-    if toggles.lastPollenValue == -1 then
+    -- Track if we've collected any pollen at all
+    if currentPollen > 0 and not toggles.hasCollectedPollen then
+        toggles.hasCollectedPollen = true
+        print("🌸 First pollen collected: " .. currentPollen)
+    end
+    
+    if currentPollen ~= toggles.lastPollenValue then
         toggles.lastPollenValue = currentPollen
         toggles.lastPollenChangeTime = tick()
-        print("🔄 Pollen tracking started: " .. currentPollen)
-    elseif currentPollen ~= toggles.lastPollenValue then
-        toggles.lastPollenValue = currentPollen
-        toggles.lastPollenChangeTime = tick()
-        print("📈 Pollen changed: " .. currentPollen)
     end
 end
 
@@ -318,9 +319,15 @@ local function shouldConvertToHive()
     local currentPollen = getCurrentPollen()
     local timeSinceLastChange = tick() - toggles.lastPollenChangeTime
     
-    print("🔍 Pollen Check - Current: " .. currentPollen .. ", Stagnant: " .. string.format("%.1f", timeSinceLastChange) .. "s")
+    -- FIXED: Only convert if we've collected pollen AND it's stagnant for 5 seconds
+    -- OR if we have pollen and it reaches 0 (shouldn't happen but safety)
+    local shouldConvert = toggles.hasCollectedPollen and (timeSinceLastChange >= 5 or currentPollen == 0)
     
-    return timeSinceLastChange >= 5 or currentPollen == 0
+    if shouldConvert then
+        print("🔍 Converting - Pollen: " .. currentPollen .. ", Stagnant: " .. string.format("%.1f", timeSinceLastChange) .. "s, HasCollected: " .. tostring(toggles.hasCollectedPollen))
+    end
+    
+    return shouldConvert
 end
 
 local function shouldReturnToField()
@@ -329,9 +336,9 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Bee Swarm Simulator Farm Bot - PART 2 \\--
+--// Bee Swarm Simulator Farm Bot - PART 2 (FIXED) \\--
 
--- Farming Logic (WITH PROPER TIMER RESET)
+-- Farming Logic (COMPLETELY FIXED)
 local function startFarming()
     if not toggles.autoFarm or toggles.isFarming or not ownedHive then 
         print("❌ Cannot start farming: autoFarm=" .. tostring(toggles.autoFarm) .. ", isFarming=" .. tostring(toggles.isFarming) .. ", ownedHive=" .. tostring(ownedHive))
@@ -347,21 +354,24 @@ local function startFarming()
     toggles.atHive = false
     
     -- FIXED: Reset pollen tracking completely
-    toggles.lastPollenValue = -1  -- Reset to -1 to force fresh start
-    toggles.lastPollenChangeTime = 0
-    toggles.fieldArrivalTime = 0
+    toggles.lastPollenValue = getCurrentPollen() -- Start with current pollen
+    toggles.lastPollenChangeTime = tick()
+    toggles.fieldArrivalTime = tick()
+    toggles.hasCollectedPollen = false -- Reset collection flag
     
     print("🚶 Moving to field: " .. toggles.field)
     
     -- Move to field
     if moveToPosition(fieldPos) then
         toggles.atField = true
-        -- FIXED: Start pollen tracking fresh when we arrive at field
+        -- FIXED: Start fresh pollen tracking
         local initialPollen = getCurrentPollen()
         toggles.lastPollenValue = initialPollen
         toggles.lastPollenChangeTime = tick()
         toggles.fieldArrivalTime = tick()
-        print("🎯 Arrived at field! Pollen tracking started: " .. initialPollen)
+        toggles.hasCollectedPollen = (initialPollen > 0) -- Set flag if we already have pollen
+        
+        print("🎯 Arrived at field! Pollen: " .. initialPollen .. ", HasCollected: " .. tostring(toggles.hasCollectedPollen))
         
         -- Start auto-dig if enabled
         if toggles.autoDig then
@@ -420,7 +430,7 @@ local function updateFarmState()
     -- Check if we should transition between states
     if toggles.isFarming and toggles.atField then
         if shouldConvertToHive() then
-            print("🔄 Pollen stagnant or empty, moving to hive")
+            print("🔄 Pollen stagnant or ready to convert, moving to hive")
             startConverting()
         else
             -- Collect tokens while farming
@@ -459,7 +469,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 
 local Window = Library:CreateWindow({
     Title = "Bee Farm Bot",
-    Footer = "v2.6 - Fixed Pollen Tracking",
+    Footer = "v2.7 - Fixed Pollen Logic",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
