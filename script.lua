@@ -1,4 +1,4 @@
---// Lavender Hub - PART 1 (AUTO CLAIM) \\--
+--// Lavender Hub - PART 1 (FIXED AUTO CLAIM) \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,7 +8,6 @@ local VirtualUser = game:GetService("VirtualUser")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
 
 -- Configuration
 local GRID_SIZE = 6
@@ -173,45 +172,12 @@ local function loadSettings()
     return false
 end
 
--- Improved Anti-Lag System
-local function optimizeGraphics()
-    if not toggles.antiLag then return end
-    
-    -- Lighting optimizations
-    pcall(function()
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 1000
-        Lighting.Brightness = 2
-    end)
-    
-    -- Remove particles and effects
-    local deletedParticles = 0
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if toggles.antiLag then
-            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Fire") or obj:IsA("Smoke") then
-                pcall(function()
-                    obj:Destroy()
-                    deletedParticles = deletedParticles + 1
-                end)
-            end
-        else
-            break
-        end
-    end
-    
-    -- Reduce graphics quality
-    pcall(function()
-        settings().Rendering.QualityLevel = 1
-    end)
-    
-    addToConsole("🎮 Graphics optimized - Removed " .. deletedParticles .. " particles")
-end
-
+-- Simple Anti-Lag System (Original)
 local function runAntiLag()
     if not toggles.antiLag then return end
     
     local targets = {
-        -- Fruits and nature objects
+        -- Original fruits
         "mango", "strawberry", "fence", "blueberry", "pear",
         "apple", "orange", "banana", "grape", "pineapple",
         "watermelon", "lemon", "lime", "cherry", "peach",
@@ -219,13 +185,9 @@ local function runAntiLag()
         "blackberry", "pomegranate", "fig", "apricot", "melon",
         "fruit", "fruits", "berry", "berries",
         
-        -- Nature and environment
+        -- New additions
         "daisy", "cactus", "forrest", "bamboo", "bear",
-        "leader", "cave", "crystal", "tree", "bush",
-        "flower", "rock", "stone", "leaf", "grass",
-        "plant", "mushroom", "fern", "vine", "weed",
-        "shrub", "trunk", "branch", "root", "petal",
-        "stem", "seed", "sprout", "blossom", "bloom"
+        "leader", "cave", "crystal"
     }
 
     local deleted = 0
@@ -248,58 +210,45 @@ local function runAntiLag()
     end
 
     toggles.objectsDeleted = toggles.objectsDeleted + deleted
-    
-    -- Run graphics optimization
-    optimizeGraphics()
-    
-    addToConsole("🌿 Deleted " .. deleted .. " objects (Total: " .. toggles.objectsDeleted .. ")")
+    addToConsole("🌿 Deleted " .. deleted .. " laggy objects (Total: " .. toggles.objectsDeleted .. ")")
 end
 
--- Auto Claim Hive System (Runs automatically on execute)
+-- Fixed Auto Claim Hive System (Runs ALL hives in order)
 local function autoClaimHive()
-    if getOwnedHive() then
-        addToConsole("✅ Already have a hive: " .. getOwnedHive())
-        return true
-    end
+    addToConsole("🔍 Auto-claiming hives...")
     
-    addToConsole("🔍 No hive detected, auto-claiming...")
+    local claimRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ClaimHive")
     
+    -- Claim ALL hives in order 1-6
     for i = 1, 6 do
         local hiveName = "Hive_" .. i
-        local hive = Workspace:FindFirstChild("Hives") and Workspace.Hives:FindFirstChild(hiveName)
+        addToConsole("🔄 Claiming " .. hiveName .. "...")
         
-        if hive then
+        local success, result = pcall(function()
+            local hive = workspace:WaitForChild("Hives"):WaitForChild(hiveName)
             local args = {hive}
-            local claimRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ClaimHive")
-            
-            addToConsole("🔄 Attempting to claim " .. hiveName .. "...")
-            
-            local success, result = pcall(function()
-                claimRemote:FireServer(unpack(args))
-            end)
-            
-            if success then
-                addToConsole("📝 Claim request sent for " .. hiveName)
-                task.wait(1) -- Wait for claim to process
-                
-                if getOwnedHive() then
-                    addToConsole("🎉 Successfully claimed " .. hiveName)
-                    return true
-                else
-                    addToConsole("❌ " .. hiveName .. " is taken, trying next...")
-                end
-            else
-                addToConsole("⚠️ Failed to claim " .. hiveName)
-            end
+            claimRemote:FireServer(unpack(args))
+        end)
+        
+        if success then
+            addToConsole("✅ Claim request sent for " .. hiveName)
         else
-            addToConsole("❓ " .. hiveName .. " not found in workspace")
+            addToConsole("❌ Failed to claim " .. hiveName)
         end
         
-        task.wait(0.5) -- Small delay between attempts
+        task.wait(0.5) -- Small delay between claims
     end
     
-    addToConsole("💔 No available hives found - all hives are taken")
-    return false
+    addToConsole("🎉 Finished auto-claiming all hives")
+    
+    -- Check which hive we actually got
+    task.wait(2) -- Wait for claims to process
+    local ownedHive = getOwnedHive()
+    if ownedHive then
+        addToConsole("🏠 Successfully claimed: " .. ownedHive)
+    else
+        addToConsole("💔 No hive claimed - all might be taken")
+    end
 end
 
 -- Performance Monitoring
@@ -614,7 +563,7 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Lavender Hub - PART 2 (AUTO CLAIM) \\--
+--// Lavender Hub - PART 2 (FIXED AUTO CLAIM) \\--
 
 -- Farming Logic
 local function startFarming()
@@ -993,20 +942,25 @@ TweenSpeedSlider:Set(toggles.tweenSpeed)
 WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
--- AUTO CLAIM HIVE ON STARTUP (IMMEDIATELY)
-spawn(function()
-    addToConsole("🚀 Lavender Hub v0.2 starting...")
-    task.wait(1) -- Small delay for game to load
-    
-    -- Auto claim hive immediately
-    autoClaimHive()
-    
-    -- Run anti-lag on startup if enabled
-    if toggles.antiLag then
-        addToConsole("Running startup Anti-Lag...")
-        runAntiLag()
-    end
-end)
+-- AUTO CLAIM ALL HIVES ON STARTUP (IMMEDIATELY - BLOCKS SCRIPT UNTIL DONE)
+addToConsole("🚀 Lavender Hub v0.2 starting...")
+addToConsole("🔄 Auto-claiming hives before starting...")
+
+-- Run auto claim FIRST before anything else
+autoClaimHive()
+
+-- Wait a bit for claims to process
+task.wait(3)
+
+-- Update owned hive after claiming
+ownedHive = getOwnedHive()
+displayHiveName = ownedHive and "Hive" or "None"
+
+-- Run anti-lag on startup if enabled
+if toggles.antiLag then
+    addToConsole("Running startup Anti-Lag...")
+    runAntiLag()
+end
 
 -- Initial console message
 addToConsole("Lavender Hub v0.2 loaded")
@@ -1014,4 +968,9 @@ addToConsole("Auto-save enabled")
 addToConsole("Continuous movement enabled")
 addToConsole("Anti-Lag system ready")
 addToConsole("Debug panel available")
-addToConsole("Auto-claim system active")
+addToConsole("Auto-claim completed")
+if ownedHive then
+    addToConsole("🏠 Owned Hive: " .. ownedHive)
+else
+    addToConsole("💔 No hive owned")
+end
