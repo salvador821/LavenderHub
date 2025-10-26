@@ -1,4 +1,3 @@
-
 --// Lavender Hub - PART 1 \\--
 
 local Players = game:GetService("Players")
@@ -8,6 +7,7 @@ local PathfindingService = game:GetService("PathfindingService")
 local VirtualUser = game:GetService("VirtualUser")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local GRID_SIZE = 6
@@ -65,6 +65,7 @@ local toggles = {
     visitedTokens = {},
     lastTokenClearTime = tick(),
     lastHiveCheckTime = tick(),
+    lastRandomMoveTime = tick(),
     
     -- Pollen tracking
     lastPollenValue = 0,
@@ -84,6 +85,10 @@ local consoleLogs = {}
 local maxConsoleLines = 50
 local consoleLabel = nil
 
+-- Auto-Save System
+local saveData = {}
+local SAVE_KEY = "LavenderHub_Settings"
+
 local function addToConsole(message)
     local timestamp = os.date("%H:%M:%S")
     local logEntry = "[" .. timestamp .. "] " .. message
@@ -99,6 +104,91 @@ local function addToConsole(message)
     if consoleLabel then
         consoleLabel:SetText(table.concat(consoleLogs, "\n"))
     end
+end
+
+-- Auto-Save Functions
+local function saveSettings()
+    local settingsToSave = {
+        field = toggles.field,
+        movementMethod = toggles.movementMethod,
+        autoFarm = toggles.autoFarm,
+        autoDig = toggles.autoDig,
+        tweenSpeed = toggles.tweenSpeed,
+        walkspeedEnabled = toggles.walkspeedEnabled,
+        walkspeed = toggles.walkspeed
+    }
+    
+    local success, encoded = pcall(function()
+        return HttpService:JSONEncode(settingsToSave)
+    end)
+    
+    if success then
+        pcall(function()
+            writefile("LavenderHub_Settings.txt", encoded)
+            addToConsole("💾 Settings saved successfully")
+        end)
+    else
+        addToConsole("❌ Failed to save settings")
+    end
+end
+
+local function loadSettings()
+    local success, content = pcall(function()
+        return readfile("LavenderHub_Settings.txt")
+    end)
+    
+    if success and content then
+        local decoded = HttpService:JSONDecode(content)
+        if decoded then
+            -- Apply loaded settings
+            toggles.field = decoded.field or toggles.field
+            toggles.movementMethod = decoded.movementMethod or toggles.movementMethod
+            toggles.autoFarm = decoded.autoFarm or toggles.autoFarm
+            toggles.autoDig = decoded.autoDig or toggles.autoDig
+            toggles.tweenSpeed = decoded.tweenSpeed or toggles.tweenSpeed
+            toggles.walkspeedEnabled = decoded.walkspeedEnabled or toggles.walkspeedEnabled
+            toggles.walkspeed = decoded.walkspeed or toggles.walkspeed
+            
+            addToConsole("💾 Settings loaded successfully")
+            return true
+        end
+    end
+    addToConsole("📝 No saved settings found, using defaults")
+    return false
+end
+
+-- Random Movement Functions
+local function getRandomPositionInField()
+    local fieldPos = fieldCoords[toggles.field]
+    if not fieldPos then return nil end
+    
+    -- Define field boundaries (adjust these values based on field size)
+    local fieldRadius = 50
+    local randomX = fieldPos.X + math.random(-fieldRadius, fieldRadius)
+    local randomZ = fieldPos.Z + math.random(-fieldRadius, fieldRadius)
+    
+    -- Keep Y position similar to field
+    local randomY = fieldPos.Y
+    
+    return Vector3.new(randomX, randomY, randomZ)
+end
+
+local function performRandomMovement()
+    if not toggles.atField or toggles.isConverting then return end
+    
+    local randomPos = getRandomPositionInField()
+    if randomPos then
+        local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:MoveTo(randomPos)
+            addToConsole("🎲 Moving to random position in field")
+        end
+    end
+end
+
+local function shouldDoRandomMove()
+    -- Do random movement every 10-20 seconds when no tokens are nearby
+    return tick() - toggles.lastRandomMoveTime >= math.random(10, 20)
 end
 
 -- Utility Functions
@@ -295,6 +385,11 @@ local function getNearestToken()
     return closestToken, shortestDistance
 end
 
+local function areTokensNearby()
+    local token, distance = getNearestToken()
+    return token ~= nil and distance <= 50
+end
+
 local function collectTokens()
     if not toggles.autoFarm or toggles.isConverting or not toggles.atField then return end
     
@@ -373,6 +468,7 @@ local function startFarming()
     toggles.lastPollenChangeTime = tick()
     toggles.fieldArrivalTime = tick()
     toggles.hasCollectedPollen = false
+    toggles.lastRandomMoveTime = tick() -- Reset random movement timer
     
     addToConsole("🚶 Moving to field: " .. toggles.field)
     
@@ -449,6 +545,12 @@ local function updateFarmState()
         else
             -- Collect tokens while farming
             collectTokens()
+            
+            -- Do random movement if no tokens nearby and it's time
+            if not areTokensNearby() and shouldDoRandomMove() then
+                performRandomMovement()
+                toggles.lastRandomMoveTime = tick()
+            end
         end
         
     elseif toggles.isConverting and toggles.atHive then
@@ -502,7 +604,7 @@ local MainTab = Window:AddTab("Farming", "shovel")
 
 -- Farming Settings
 local FarmingGroupbox = MainTab:AddLeftGroupbox("Farming Settings")
-FarmingGroupbox:AddDropdown("FieldDropdown", {
+local FieldDropdown = FarmingGroupbox:AddDropdown("FieldDropdown", {
     Values = {"Mango Field", "Blueberry Field", "Daisy Field", "Cactus Field", "Strawberry Field", "Apple Field", "Lemon Field", "Grape Field", "Watermelon Field", "Forest Field", "Pear Field", "Mushroom Field", "Clover Field", "Bamboo Field", "Glitch Field", "Cave Field", "Mountain Field"},
     Default = 1,
     Multi = false,
@@ -510,15 +612,17 @@ FarmingGroupbox:AddDropdown("FieldDropdown", {
     Tooltip = "Select field to farm",
     Callback = function(Value)
         toggles.field = Value
+        saveSettings()
     end
 })
 
-FarmingGroupbox:AddToggle("AutoFarmToggle", {
+local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
     Text = "Auto Farm",
     Default = false,
     Tooltip = "Start automated farming",
     Callback = function(Value)
         toggles.autoFarm = Value
+        saveSettings()
         if Value then
             startFarming()
         else
@@ -530,12 +634,13 @@ FarmingGroupbox:AddToggle("AutoFarmToggle", {
     end
 })
 
-FarmingGroupbox:AddToggle("AutoDigToggle", {
+local AutoDigToggle = FarmingGroupbox:AddToggle("AutoDigToggle", {
     Text = "Auto Dig",
     Default = false,
     Tooltip = "Automatically use tools to collect pollen",
     Callback = function(Value)
         toggles.autoDig = Value
+        saveSettings()
         if Value and toggles.atField and not toggles.isConverting then
             coroutine.wrap(DigLoop)()
         end
@@ -544,7 +649,7 @@ FarmingGroupbox:AddToggle("AutoDigToggle", {
 
 -- Movement Settings
 local MovementGroupbox = MainTab:AddRightGroupbox("Movement Settings")
-MovementGroupbox:AddDropdown("MovementMethod", {
+local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
     Values = {"Walk", "Tween"},
     Default = 1,
     Multi = false,
@@ -552,10 +657,11 @@ MovementGroupbox:AddDropdown("MovementMethod", {
     Tooltip = "How to move between locations",
     Callback = function(Value)
         toggles.movementMethod = Value
+        saveSettings()
     end
 })
 
-MovementGroupbox:AddSlider("TweenSpeed", {
+local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
     Text = "Tween Speed",
     Default = 6,
     Min = 1,
@@ -565,17 +671,19 @@ MovementGroupbox:AddSlider("TweenSpeed", {
     Tooltip = "Tween movement speed (higher = faster)",
     Callback = function(Value)
         toggles.tweenSpeed = Value
+        saveSettings()
     end
 })
 
 -- Player Settings
 local PlayerGroupbox = MainTab:AddLeftGroupbox("Player Settings")
-PlayerGroupbox:AddToggle("WalkspeedToggle", {
+local WalkspeedToggle = PlayerGroupbox:AddToggle("WalkspeedToggle", {
     Text = "Enable Walkspeed",
     Default = false,
     Tooltip = "Enable custom walkspeed",
     Callback = function(Value)
         toggles.walkspeedEnabled = Value
+        saveSettings()
         if not Value and player.Character then
             local humanoid = player.Character:FindFirstChild("Humanoid")
             if humanoid then humanoid.WalkSpeed = 16 end
@@ -583,7 +691,7 @@ PlayerGroupbox:AddToggle("WalkspeedToggle", {
     end
 })
 
-PlayerGroupbox:AddSlider("WalkspeedSlider", {
+local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
     Text = "Walkspeed",
     Default = 50,
     Min = 16,
@@ -593,6 +701,7 @@ PlayerGroupbox:AddSlider("WalkspeedSlider", {
     Tooltip = "Player walkspeed",
     Callback = function(Value)
         toggles.walkspeed = Value
+        saveSettings()
     end
 })
 
@@ -664,8 +773,22 @@ coroutine.wrap(function()
     end
 end)()
 
+-- Load settings on startup
+loadSettings()
+
+-- Apply loaded settings to GUI
+FieldDropdown:Set(toggles.field)
+AutoFarmToggle:Set(toggles.autoFarm)
+AutoDigToggle:Set(toggles.autoDig)
+MovementMethodDropdown:Set(toggles.movementMethod)
+TweenSpeedSlider:Set(toggles.tweenSpeed)
+WalkspeedToggle:Set(toggles.walkspeedEnabled)
+WalkspeedSlider:Set(toggles.walkspeed)
+
 -- Initial console message
 addToConsole("🎯 Lavender Hub v0.2 loaded successfully!")
+addToConsole("💾 Auto-save system enabled")
+addToConsole("🎲 Random movement system enabled")
 addToConsole("🔍 Hive detection active - checking every 10 seconds")
 if ownedHive then
     addToConsole("🏠 Initial hive detected: " .. ownedHive)
