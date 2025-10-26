@@ -1,4 +1,4 @@
---// Bee Swarm Simulator Farm Bot \\--
+--// Bee Swarm Simulator Farm Bot - PART 1 \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,7 +15,7 @@ local CHECK_INTERVAL = 0.1
 local OBSTACLE_CHECK_DISTANCE = 5
 local MOVETO_TIMEOUT = 5
 local TOKEN_CLEAR_INTERVAL = 5
-local HIVE_CHECK_INTERVAL = 10 -- Check hive ownership every 10 seconds
+local HIVE_CHECK_INTERVAL = 10
 
 -- Field Coordinates
 local fieldCoords = {
@@ -51,10 +51,10 @@ local hiveCoords = {
 -- Toggles and State
 local toggles = {
     field = "Mango Field",
-    movementMethod = "Walk", -- "Walk" or "Tween"
+    movementMethod = "Walk",
     autoFarm = false,
     autoDig = false,
-    tweenSpeed = 6, -- 1-12 scale
+    tweenSpeed = 6,
     walkspeedEnabled = false,
     walkspeed = 50,
     isFarming = false,
@@ -65,10 +65,10 @@ local toggles = {
     lastTokenClearTime = tick(),
     lastHiveCheckTime = tick(),
     
-    -- Pollen tracking
-    lastPollenValue = 0,
+    -- Pollen tracking - FIXED: Initialize properly
+    lastPollenValue = -1, -- Start with -1 to ensure first update triggers change
     lastPollenChangeTime = 0,
-    fieldArrivalTime = 0 -- Track when we actually arrive at field
+    fieldArrivalTime = 0
 }
 
 local player = Players.LocalPlayer
@@ -77,6 +77,7 @@ local events = ReplicatedStorage:WaitForChild("Events", 10)
 -- Auto-dig variables
 local digRunning = false
 
+-- Utility Functions
 local function GetCharacter()
     return player.Character or player.CharacterAdded:Wait()
 end
@@ -94,6 +95,131 @@ local function SafeCall(func, name)
         warn("Error in " .. (name or "unknown") .. ": " .. err)
     end
     return success
+end
+
+local function formatNumber(num)
+    local suffixes = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qad", "Qid"}
+    local i = 1
+    while num >= 1000 and i < #suffixes do
+        num = num / 1000
+        i = i + 1
+    end
+    return i == 1 and tostring(num) or string.format("%.1f%s", num, suffixes[i])
+end
+
+-- Get current pollen value
+local function getCurrentPollen()
+    local pollenValue = player:FindFirstChild("Pollen")
+    if pollenValue and pollenValue:IsA("NumberValue") then
+        return pollenValue.Value
+    end
+    return 0
+end
+
+-- Auto-detect owned hive
+local function getOwnedHive()
+    local hiveObject = player:FindFirstChild("Hive")
+    if hiveObject and hiveObject:IsA("ObjectValue") and hiveObject.Value then
+        local hiveName = hiveObject.Value.Name
+        if hiveCoords[hiveName] then
+            return hiveName
+        end
+    end
+    return nil
+end
+
+local ownedHive = getOwnedHive()
+local displayHiveName = ownedHive and "Hive" or "None"
+
+-- Periodic hive checking function
+local function checkHiveOwnership()
+    if tick() - toggles.lastHiveCheckTime >= HIVE_CHECK_INTERVAL then
+        local previousHive = ownedHive
+        ownedHive = getOwnedHive()
+        
+        if ownedHive and ownedHive ~= previousHive then
+            print("🎯 New hive detected: " .. ownedHive)
+            displayHiveName = "Hive"
+        elseif not ownedHive and previousHive then
+            print("❌ Hive ownership lost")
+            displayHiveName = "None"
+        elseif ownedHive and previousHive == nil then
+            print("🎯 Hive ownership acquired: " .. ownedHive)
+            displayHiveName = "Hive"
+        end
+        
+        toggles.lastHiveCheckTime = tick()
+    end
+end
+
+-- Movement Functions
+local function moveToPositionTween(targetPos)
+    local character = player.Character
+    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return false end
+
+    local distance = (humanoidRootPart.Position - targetPos).Magnitude
+    local baseSpeed = 20
+    local speedMultiplier = (toggles.tweenSpeed / 6) * 1.5
+    local duration = distance / (baseSpeed * speedMultiplier)
+    
+    local tweenInfo = TweenInfo.new(
+        duration,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out,
+        0,
+        false,
+        0
+    )
+    
+    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
+    tween:Play()
+    tween.Completed:Wait()
+    
+    return true
+end
+
+local function moveToPositionWalk(targetPos)
+    local character = player.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not humanoidRootPart then return false end
+    
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        WaypointSpacing = GRID_SIZE
+    })
+    
+    local success, errorMessage = pcall(function()
+        path:ComputeAsync(humanoidRootPart.Position, targetPos)
+    end)
+    
+    if not success or path.Status ~= Enum.PathStatus.Success then
+        humanoid:MoveTo(targetPos)
+        humanoid.MoveToFinished:Wait(10)
+        return true
+    end
+    
+    local waypoints = path:GetWaypoints()
+    for _, waypoint in ipairs(waypoints) do
+        humanoid:MoveTo(waypoint.Position)
+        if waypoint.Action == Enum.PathWaypointAction.Jump then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        humanoid.MoveToFinished:Wait(5)
+    end
+    
+    return true
+end
+
+local function moveToPosition(targetPos)
+    if toggles.movementMethod == "Tween" then
+        return moveToPositionTween(targetPos)
+    else
+        return moveToPositionWalk(targetPos)
+    end
 end
 
 -- Auto-dig function
@@ -124,138 +250,6 @@ local function DigLoop()
     digRunning = false
 end
 
--- Auto-detect owned hive (with periodic checking)
-local function getOwnedHive()
-    local hiveObject = player:FindFirstChild("Hive")
-    if hiveObject and hiveObject:IsA("ObjectValue") and hiveObject.Value then
-        local hiveName = hiveObject.Value.Name
-        if hiveCoords[hiveName] then
-            return hiveName
-        end
-    end
-    return nil -- No hive owned yet
-end
-
-local ownedHive = getOwnedHive()
-local displayHiveName = ownedHive and "Hive" or "None"
-
--- Periodic hive checking function
-local function checkHiveOwnership()
-    if tick() - toggles.lastHiveCheckTime >= HIVE_CHECK_INTERVAL then
-        local previousHive = ownedHive
-        ownedHive = getOwnedHive()
-        
-        if ownedHive and ownedHive ~= previousHive then
-            print("🎯 New hive detected: " .. ownedHive)
-            displayHiveName = "Hive"
-        elseif not ownedHive and previousHive then
-            print("❌ Hive ownership lost")
-            displayHiveName = "None"
-        elseif ownedHive and previousHive == nil then
-            print("🎯 Hive ownership acquired: " .. ownedHive)
-            displayHiveName = "Hive"
-        end
-        
-        toggles.lastHiveCheckTime = tick()
-    end
-end
-
--- Utility Functions
-local function formatNumber(num)
-    local suffixes = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qad", "Qid"}
-    local i = 1
-    while num >= 1000 and i < #suffixes do
-        num = num / 1000
-        i = i + 1
-    end
-    return i == 1 and tostring(num) or string.format("%.1f%s", num, suffixes[i])
-end
-
--- Get current pollen value
-local function getCurrentPollen()
-    local pollenValue = player:FindFirstChild("Pollen")
-    if pollenValue and pollenValue:IsA("NumberValue") then
-        return pollenValue.Value
-    end
-    return 0
-end
-
--- Smoother Tween Movement
-local function moveToPositionTween(targetPos)
-    local character = player.Character
-    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return false end
-
-    -- Calculate tween duration with better speed scaling
-    local distance = (humanoidRootPart.Position - targetPos).Magnitude
-    local baseSpeed = 20 -- Increased base speed for smoother movement
-    local speedMultiplier = (toggles.tweenSpeed / 6) * 1.5 -- Better scaling
-    local duration = distance / (baseSpeed * speedMultiplier)
-    
-    -- Use smoother easing
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Quad, -- Smoother easing
-        Enum.EasingDirection.Out,
-        0,
-        false,
-        0
-    )
-    
-    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
-    tween:Play()
-    
-    local success = true
-    tween.Completed:Wait()
-    
-    return success
-end
-
-local function moveToPositionWalk(targetPos)
-    local character = player.Character
-    local humanoid = character and character:FindFirstChild("Humanoid")
-    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not humanoidRootPart then return false end
-    
-    -- Use pathfinding for walk method
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        WaypointSpacing = GRID_SIZE
-    })
-    
-    local success, errorMessage = pcall(function()
-        path:ComputeAsync(humanoidRootPart.Position, targetPos)
-    end)
-    
-    if not success or path.Status ~= Enum.PathStatus.Success then
-        -- Fallback to direct movement if pathfinding fails
-        humanoid:MoveTo(targetPos)
-        humanoid.MoveToFinished:Wait(10)
-        return true
-    end
-    
-    local waypoints = path:GetWaypoints()
-    for _, waypoint in ipairs(waypoints) do
-        humanoid:MoveTo(waypoint.Position)
-        if waypoint.Action == Enum.PathWaypointAction.Jump then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-        humanoid.MoveToFinished:Wait(5)
-    end
-    
-    return true
-end
-
-local function moveToPosition(targetPos)
-    if toggles.movementMethod == "Tween" then
-        return moveToPositionTween(targetPos)
-    else
-        return moveToPositionWalk(targetPos)
-    end
-end
-
 -- Token Collection
 local function getNearestToken()
     local closestToken = nil
@@ -281,7 +275,7 @@ local function collectTokens()
     if not toggles.autoFarm or toggles.isConverting or not toggles.atField then return end
     
     local token, dist = getNearestToken()
-    if token and dist <= 50 then -- Only collect tokens within 50 studs
+    if token and dist <= 50 then
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(token.Position)
@@ -300,15 +294,21 @@ local function collectTokens()
     end
 end
 
--- Pollen Tracking (RESET PROPERLY)
+-- Pollen Tracking - FIXED: Proper initialization and tracking
 local function updatePollenTracking()
-    if not toggles.atField then return end -- Only track when at field
+    if not toggles.atField then return end
     
     local currentPollen = getCurrentPollen()
     
-    if currentPollen ~= toggles.lastPollenValue then
+    -- FIX: Always update on first check at field, then track changes
+    if toggles.lastPollenValue == -1 then
         toggles.lastPollenValue = currentPollen
         toggles.lastPollenChangeTime = tick()
+        print("🔄 Pollen tracking started: " .. currentPollen)
+    elseif currentPollen ~= toggles.lastPollenValue then
+        toggles.lastPollenValue = currentPollen
+        toggles.lastPollenChangeTime = tick()
+        print("📈 Pollen changed: " .. currentPollen)
     end
 end
 
@@ -318,7 +318,8 @@ local function shouldConvertToHive()
     local currentPollen = getCurrentPollen()
     local timeSinceLastChange = tick() - toggles.lastPollenChangeTime
     
-    -- Convert if pollen hasn't changed for 5 seconds OR if pollen is 0
+    print("🔍 Pollen Check - Current: " .. currentPollen .. ", Stagnant: " .. string.format("%.1f", timeSinceLastChange) .. "s")
+    
     return timeSinceLastChange >= 5 or currentPollen == 0
 end
 
@@ -326,13 +327,16 @@ local function shouldReturnToField()
     if not toggles.isConverting or not toggles.atHive then return false end
     
     local currentPollen = getCurrentPollen()
-    -- Return to field when pollen reaches 0
     return currentPollen == 0
 end
+--// Bee Swarm Simulator Farm Bot - PART 2 \\--
 
 -- Farming Logic (WITH PROPER TIMER RESET)
 local function startFarming()
-    if not toggles.autoFarm or toggles.isFarming or not ownedHive then return end
+    if not toggles.autoFarm or toggles.isFarming or not ownedHive then 
+        print("❌ Cannot start farming: autoFarm=" .. tostring(toggles.autoFarm) .. ", isFarming=" .. tostring(toggles.isFarming) .. ", ownedHive=" .. tostring(ownedHive))
+        return 
+    end
     
     local fieldPos = fieldCoords[toggles.field]
     if not fieldPos then return end
@@ -342,24 +346,30 @@ local function startFarming()
     toggles.atField = false
     toggles.atHive = false
     
-    -- Reset pollen tracking completely
-    toggles.lastPollenValue = 0
+    -- FIXED: Reset pollen tracking completely
+    toggles.lastPollenValue = -1  -- Reset to -1 to force fresh start
     toggles.lastPollenChangeTime = 0
     toggles.fieldArrivalTime = 0
+    
+    print("🚶 Moving to field: " .. toggles.field)
     
     -- Move to field
     if moveToPosition(fieldPos) then
         toggles.atField = true
-        -- Start pollen tracking fresh when we arrive at field
-        toggles.lastPollenValue = getCurrentPollen()
+        -- FIXED: Start pollen tracking fresh when we arrive at field
+        local initialPollen = getCurrentPollen()
+        toggles.lastPollenValue = initialPollen
         toggles.lastPollenChangeTime = tick()
         toggles.fieldArrivalTime = tick()
-        print("🎯 Arrived at field, starting fresh pollen tracking")
+        print("🎯 Arrived at field! Pollen tracking started: " .. initialPollen)
         
         -- Start auto-dig if enabled
         if toggles.autoDig then
             coroutine.wrap(DigLoop)()
         end
+    else
+        print("❌ Failed to move to field")
+        toggles.isFarming = false
     end
 end
 
@@ -373,6 +383,8 @@ local function startConverting()
     toggles.isConverting = true
     toggles.atField = false
     toggles.atHive = false
+    
+    print("🚶 Moving to hive for conversion")
     
     -- Move to hive
     if moveToPosition(hivePos) then
@@ -389,6 +401,9 @@ local function startConverting()
             makeHoneyRemote:FireServer(unpack(args))
             print("🍯 Started honey conversion")
         end
+    else
+        print("❌ Failed to move to hive")
+        toggles.isConverting = false
     end
 end
 
@@ -444,7 +459,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 
 local Window = Library:CreateWindow({
     Title = "Bee Farm Bot",
-    Footer = "v2.5 - Dynamic Hive Detection",
+    Footer = "v2.6 - Fixed Pollen Tracking",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -612,10 +627,18 @@ coroutine.wrap(function()
         WrappedLabel:SetText(string.format(
             "Pollen 🌸: %s\nField: %s\nOwned Hive: %s\nMovement: %s\nAuto Dig: %s",
             formatNumber(currentPollen),
-                   toggles.field,
+            toggles.field,
             displayHiveName,
             toggles.movementMethod,
             toggles.autoDig and "ON" or "OFF"
         ))
     end
 end)()
+
+print("🎯 Bee Farm Bot loaded successfully!")
+print("🔍 Hive detection active - checking every 10 seconds")
+if ownedHive then
+    print("🏠 Initial hive detected: " .. ownedHive)
+else
+    print("❌ No hive owned yet - waiting for hive acquisition...")
+end
