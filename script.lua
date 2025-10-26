@@ -1,4 +1,5 @@
---// Bee Swarm Simulator Farm Bot - PART 1 (FIXED) \\--
+
+--// Lavender Hub - PART 1 \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -65,11 +66,11 @@ local toggles = {
     lastTokenClearTime = tick(),
     lastHiveCheckTime = tick(),
     
-    -- Pollen tracking - FIXED: Proper initialization
+    -- Pollen tracking
     lastPollenValue = 0,
     lastPollenChangeTime = 0,
     fieldArrivalTime = 0,
-    hasCollectedPollen = false -- NEW: Track if we've collected any pollen at all
+    hasCollectedPollen = false
 }
 
 local player = Players.LocalPlayer
@@ -77,6 +78,28 @@ local events = ReplicatedStorage:WaitForChild("Events", 10)
 
 -- Auto-dig variables
 local digRunning = false
+
+-- Console System
+local consoleLogs = {}
+local maxConsoleLines = 50
+local consoleLabel = nil
+
+local function addToConsole(message)
+    local timestamp = os.date("%H:%M:%S")
+    local logEntry = "[" .. timestamp .. "] " .. message
+    
+    table.insert(consoleLogs, logEntry)
+    
+    -- Keep only the latest lines
+    if #consoleLogs > maxConsoleLines then
+        table.remove(consoleLogs, 1)
+    end
+    
+    -- Update console display if it exists
+    if consoleLabel then
+        consoleLabel:SetText(table.concat(consoleLogs, "\n"))
+    end
+end
 
 -- Utility Functions
 local function GetCharacter()
@@ -93,7 +116,7 @@ end
 local function SafeCall(func, name)
     local success, err = pcall(func)
     if not success then
-        warn("Error in " .. (name or "unknown") .. ": " .. err)
+        addToConsole("❌ Error in " .. (name or "unknown") .. ": " .. err)
     end
     return success
 end
@@ -139,13 +162,13 @@ local function checkHiveOwnership()
         ownedHive = getOwnedHive()
         
         if ownedHive and ownedHive ~= previousHive then
-            print("🎯 New hive detected: " .. ownedHive)
+            addToConsole("🎯 New hive detected: " .. ownedHive)
             displayHiveName = "Hive"
         elseif not ownedHive and previousHive then
-            print("❌ Hive ownership lost")
+            addToConsole("❌ Hive ownership lost")
             displayHiveName = "None"
         elseif ownedHive and previousHive == nil then
-            print("🎯 Hive ownership acquired: " .. ownedHive)
+            addToConsole("🎯 Hive ownership acquired: " .. ownedHive)
             displayHiveName = "Hive"
         end
         
@@ -295,7 +318,7 @@ local function collectTokens()
     end
 end
 
--- Pollen Tracking - FIXED: Better logic
+-- Pollen Tracking
 local function updatePollenTracking()
     if not toggles.atField then return end
     
@@ -304,7 +327,6 @@ local function updatePollenTracking()
     -- Track if we've collected any pollen at all
     if currentPollen > 0 and not toggles.hasCollectedPollen then
         toggles.hasCollectedPollen = true
-        print("🌸 First pollen collected: " .. currentPollen)
     end
     
     if currentPollen ~= toggles.lastPollenValue then
@@ -319,15 +341,8 @@ local function shouldConvertToHive()
     local currentPollen = getCurrentPollen()
     local timeSinceLastChange = tick() - toggles.lastPollenChangeTime
     
-    -- FIXED: Only convert if we've collected pollen AND it's stagnant for 5 seconds
-    -- OR if we have pollen and it reaches 0 (shouldn't happen but safety)
-    local shouldConvert = toggles.hasCollectedPollen and (timeSinceLastChange >= 5 or currentPollen == 0)
-    
-    if shouldConvert then
-        print("🔍 Converting - Pollen: " .. currentPollen .. ", Stagnant: " .. string.format("%.1f", timeSinceLastChange) .. "s, HasCollected: " .. tostring(toggles.hasCollectedPollen))
-    end
-    
-    return shouldConvert
+    -- Only convert if we've collected pollen AND it's stagnant for 5 seconds
+    return toggles.hasCollectedPollen and (timeSinceLastChange >= 5 or currentPollen == 0)
 end
 
 local function shouldReturnToField()
@@ -336,12 +351,12 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Bee Swarm Simulator Farm Bot - PART 2 (FIXED) \\--
+--// Lavender Hub - PART 2 \\--
 
--- Farming Logic (COMPLETELY FIXED)
+-- Farming Logic
 local function startFarming()
     if not toggles.autoFarm or toggles.isFarming or not ownedHive then 
-        print("❌ Cannot start farming: autoFarm=" .. tostring(toggles.autoFarm) .. ", isFarming=" .. tostring(toggles.isFarming) .. ", ownedHive=" .. tostring(ownedHive))
+        addToConsole("❌ Cannot start farming - check hive ownership")
         return 
     end
     
@@ -353,32 +368,31 @@ local function startFarming()
     toggles.atField = false
     toggles.atHive = false
     
-    -- FIXED: Reset pollen tracking completely
-    toggles.lastPollenValue = getCurrentPollen() -- Start with current pollen
+    -- Reset pollen tracking completely
+    toggles.lastPollenValue = getCurrentPollen()
     toggles.lastPollenChangeTime = tick()
     toggles.fieldArrivalTime = tick()
-    toggles.hasCollectedPollen = false -- Reset collection flag
+    toggles.hasCollectedPollen = false
     
-    print("🚶 Moving to field: " .. toggles.field)
+    addToConsole("🚶 Moving to field: " .. toggles.field)
     
     -- Move to field
     if moveToPosition(fieldPos) then
         toggles.atField = true
-        -- FIXED: Start fresh pollen tracking
         local initialPollen = getCurrentPollen()
         toggles.lastPollenValue = initialPollen
         toggles.lastPollenChangeTime = tick()
         toggles.fieldArrivalTime = tick()
-        toggles.hasCollectedPollen = (initialPollen > 0) -- Set flag if we already have pollen
+        toggles.hasCollectedPollen = (initialPollen > 0)
         
-        print("🎯 Arrived at field! Pollen: " .. initialPollen .. ", HasCollected: " .. tostring(toggles.hasCollectedPollen))
+        addToConsole("🎯 Arrived at " .. toggles.field)
         
         -- Start auto-dig if enabled
         if toggles.autoDig then
             coroutine.wrap(DigLoop)()
         end
     else
-        print("❌ Failed to move to field")
+        addToConsole("❌ Failed to move to field")
         toggles.isFarming = false
     end
 end
@@ -394,12 +408,12 @@ local function startConverting()
     toggles.atField = false
     toggles.atHive = false
     
-    print("🚶 Moving to hive for conversion")
+    addToConsole("🚶 Moving to hive for conversion")
     
     -- Move to hive
     if moveToPosition(hivePos) then
         toggles.atHive = true
-        print("🏠 Arrived at hive, starting conversion in 2 seconds")
+        addToConsole("🏠 Arrived at hive")
         
         -- Wait 2 seconds then start conversion
         task.wait(2)
@@ -409,10 +423,10 @@ local function startConverting()
         local makeHoneyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MakeHoney")
         if makeHoneyRemote then
             makeHoneyRemote:FireServer(unpack(args))
-            print("🍯 Started honey conversion")
+            addToConsole("🍯 Started honey conversion")
         end
     else
-        print("❌ Failed to move to hive")
+        addToConsole("❌ Failed to move to hive")
         toggles.isConverting = false
     end
 end
@@ -430,7 +444,7 @@ local function updateFarmState()
     -- Check if we should transition between states
     if toggles.isFarming and toggles.atField then
         if shouldConvertToHive() then
-            print("🔄 Pollen stagnant or ready to convert, moving to hive")
+            addToConsole("🔄 Converting to honey")
             startConverting()
         else
             -- Collect tokens while farming
@@ -439,7 +453,7 @@ local function updateFarmState()
         
     elseif toggles.isConverting and toggles.atHive then
         if shouldReturnToField() then
-            print("✅ Pollen converted, returning to field")
+            addToConsole("✅ Returning to field")
             startFarming()
         end
     end
@@ -468,13 +482,13 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Bee Farm Bot",
-    Footer = "v2.7 - Fixed Pollen Logic",
+    Title = "Lavender Hub",
+    Footer = "v0.2",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
     ShowCustomCursor = false,
-    Size = UDim2.fromOffset(720, 400),
+    Size = UDim2.fromOffset(720, 500),
     Resizable = false
 })
 
@@ -582,6 +596,11 @@ PlayerGroupbox:AddSlider("WalkspeedSlider", {
     end
 })
 
+-- Console Tab
+local ConsoleTab = Window:AddTab("Console", "terminal")
+local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.2 - Console Ready", DoesWrap = true })
+
 -- Status Groupbox
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
 local StatusLabel = StatusGroupbox:AddLabel("Status: Idle")
@@ -645,10 +664,11 @@ coroutine.wrap(function()
     end
 end)()
 
-print("🎯 Bee Farm Bot loaded successfully!")
-print("🔍 Hive detection active - checking every 10 seconds")
+-- Initial console message
+addToConsole("🎯 Lavender Hub v0.2 loaded successfully!")
+addToConsole("🔍 Hive detection active - checking every 10 seconds")
 if ownedHive then
-    print("🏠 Initial hive detected: " .. ownedHive)
+    addToConsole("🏠 Initial hive detected: " .. ownedHive)
 else
-    print("❌ No hive owned yet - waiting for hive acquisition...")
+    addToConsole("❌ No hive owned yet - waiting for hive acquisition...")
 end
