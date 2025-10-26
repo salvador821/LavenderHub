@@ -1,4 +1,4 @@
---// Lavender Hub - PART 1 (OPTIMIZED) \\--
+--// Lavender Hub - PART 1 (WITH ANTI-LAG & DEBUG) \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,7 +11,7 @@ local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local GRID_SIZE = 6
-local CHECK_INTERVAL = 0.2 -- Increased to reduce lag
+local CHECK_INTERVAL = 0.2
 local TOKEN_CLEAR_INTERVAL = 5
 local HIVE_CHECK_INTERVAL = 10
 
@@ -52,6 +52,7 @@ local toggles = {
     movementMethod = "Walk",
     autoFarm = false,
     autoDig = false,
+    antiLag = false,
     tweenSpeed = 6,
     walkspeedEnabled = false,
     walkspeed = 50,
@@ -71,7 +72,15 @@ local toggles = {
     
     -- Movement optimization
     isMoving = false,
-    currentTarget = nil
+    currentTarget = nil,
+    
+    -- Debug info
+    objectsDeleted = 0,
+    performanceStats = {
+        fps = 0,
+        memory = 0,
+        ping = 0
+    }
 }
 
 local player = Players.LocalPlayer
@@ -82,8 +91,11 @@ local digRunning = false
 
 -- Console System
 local consoleLogs = {}
-local maxConsoleLines = 30 -- Reduced to improve performance
+local maxConsoleLines = 30
 local consoleLabel = nil
+
+-- Debug System
+local debugLabels = {}
 
 -- Auto-Save System
 local saveData = {}
@@ -94,12 +106,10 @@ local function addToConsole(message)
     
     table.insert(consoleLogs, logEntry)
     
-    -- Keep only the latest lines
     if #consoleLogs > maxConsoleLines then
         table.remove(consoleLogs, 1)
     end
     
-    -- Update console display if it exists (with debounce)
     if consoleLabel then
         consoleLabel:SetText(table.concat(consoleLogs, "\n"))
     end
@@ -112,6 +122,7 @@ local function saveSettings()
         movementMethod = toggles.movementMethod,
         autoFarm = toggles.autoFarm,
         autoDig = toggles.autoDig,
+        antiLag = toggles.antiLag,
         tweenSpeed = toggles.tweenSpeed,
         walkspeedEnabled = toggles.walkspeedEnabled,
         walkspeed = toggles.walkspeed
@@ -122,31 +133,151 @@ local function saveSettings()
     end)
     
     if success then
-        pcall(function()
+        local writeSuccess, writeError = pcall(function()
             writefile("LavenderHub_Settings.txt", encoded)
         end)
+        if writeSuccess then
+            addToConsole("Settings saved")
+        end
     end
 end
 
 local function loadSettings()
-    local success, content = pcall(function()
-        return readfile("LavenderHub_Settings.txt")
+    local fileSuccess, content = pcall(function()
+        if isfile and isfile("LavenderHub_Settings.txt") then
+            return readfile("LavenderHub_Settings.txt")
+        end
+        return nil
     end)
     
-    if success and content then
-        local decoded = HttpService:JSONDecode(content)
-        if decoded then
+    if fileSuccess and content then
+        local decodeSuccess, decoded = pcall(function()
+            return HttpService:JSONDecode(content)
+        end)
+        
+        if decodeSuccess and decoded then
             toggles.field = decoded.field or toggles.field
             toggles.movementMethod = decoded.movementMethod or toggles.movementMethod
             toggles.autoFarm = decoded.autoFarm or toggles.autoFarm
             toggles.autoDig = decoded.autoDig or toggles.autoDig
+            toggles.antiLag = decoded.antiLag or toggles.antiLag
             toggles.tweenSpeed = decoded.tweenSpeed or toggles.tweenSpeed
             toggles.walkspeedEnabled = decoded.walkspeedEnabled or toggles.walkspeedEnabled
             toggles.walkspeed = decoded.walkspeed or toggles.walkspeed
+            addToConsole("Settings loaded")
             return true
         end
     end
+    addToConsole("No saved settings")
     return false
+end
+
+-- Anti-Lag System
+local function runAntiLag()
+    if not toggles.antiLag then return end
+    
+    local targets = {
+        -- Original fruits
+        "mango", "strawberry", "fence", "blueberry", "pear",
+        "apple", "orange", "banana", "grape", "pineapple",
+        "watermelon", "lemon", "lime", "cherry", "peach",
+        "plum", "kiwi", "coconut", "avocado", "raspberry",
+        "blackberry", "pomegranate", "fig", "apricot", "melon",
+        "fruit", "fruits", "berry", "berries",
+        
+        -- New additions
+        "daisy", "cactus", "forrest", "bamboo", "bear",
+        "hive", "hives", "leader", "cave", "crystal"
+    }
+
+    local deleted = 0
+
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if toggles.antiLag then -- Check if still enabled
+            local name = obj.Name:lower()
+            for _, target in pairs(targets) do
+                if name:find(target) then
+                    pcall(function()
+                        obj:Destroy()
+                        deleted = deleted + 1
+                    end)
+                    break
+                end
+            end
+        else
+            break -- Stop if anti-lag was disabled
+        end
+    end
+
+    toggles.objectsDeleted = toggles.objectsDeleted + deleted
+    addToConsole("🌿 Deleted " .. deleted .. " laggy objects (Total: " .. toggles.objectsDeleted .. ")")
+end
+
+-- Auto Claim Hive System
+local function autoClaimHive()
+    if getOwnedHive() then
+        addToConsole("Already have a hive")
+        return true
+    end
+    
+    addToConsole("Attempting to claim hive...")
+    
+    for i = 1, 6 do
+        local hiveName = "Hive_" .. i
+        local hive = Workspace:FindFirstChild("Hives") and Workspace.Hives:FindFirstChild(hiveName)
+        
+        if hive then
+            local args = {hive}
+            local claimRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ClaimHive")
+            
+            local success, result = pcall(function()
+                claimRemote:FireServer(unpack(args))
+            end)
+            
+            if success then
+                addToConsole("Claimed " .. hiveName)
+                task.wait(1)
+                
+                if getOwnedHive() then
+                    addToConsole("Successfully claimed " .. hiveName)
+                    return true
+                else
+                    addToConsole(hiveName .. " might be taken, trying next...")
+                end
+            else
+                addToConsole("Failed to claim " .. hiveName)
+            end
+        else
+            addToConsole(hiveName .. " not found")
+        end
+        
+        task.wait(0.5)
+    end
+    
+    addToConsole("No available hives found")
+    return false
+end
+
+-- Performance Monitoring
+local function updatePerformanceStats()
+    toggles.performanceStats.fps = math.floor(1 / RunService.Heartbeat:Wait())
+    
+    local stats = game:GetService("Stats")
+    local memory = stats:FindFirstChild("Workspace") and stats.Workspace:FindFirstChild("Memory")
+    if memory then
+        toggles.performanceStats.memory = math.floor(memory:GetValue() / 1024 / 1024) -- Convert to MB
+    end
+    
+    -- Update debug display
+    if debugLabels.fps then
+        debugLabels.fps:SetText("FPS: " .. toggles.performanceStats.fps)
+    end
+    if debugLabels.memory then
+        debugLabels.memory:SetText("Memory: " .. toggles.performanceStats.memory .. " MB")
+    end
+    if debugLabels.objects then
+        debugLabels.objects:SetText("Objects Deleted: " .. toggles.objectsDeleted)
+    end
 end
 
 -- Optimized Movement Functions
@@ -154,7 +285,6 @@ local function getRandomPositionInField()
     local fieldPos = fieldCoords[toggles.field]
     if not fieldPos then return nil end
     
-    -- Smaller movement radius for continuous movement
     local fieldRadius = 25
     local randomX = fieldPos.X + math.random(-fieldRadius, fieldRadius)
     local randomZ = fieldPos.Z + math.random(-fieldRadius, fieldRadius)
@@ -174,9 +304,8 @@ local function performContinuousMovement()
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(randomPos)
-            -- Don't wait for completion - let it move continuously
             spawn(function()
-                task.wait(2) -- Move for 2 seconds then find new target
+                task.wait(2)
                 toggles.isMoving = false
                 toggles.currentTarget = nil
             end)
@@ -187,7 +316,7 @@ local function performContinuousMovement()
     end
 end
 
--- Utility Functions (Optimized)
+-- Utility Functions
 local function GetCharacter()
     return player.Character or player.CharacterAdded:Wait()
 end
@@ -195,9 +324,8 @@ end
 local function SafeCall(func, name)
     local success, err = pcall(func)
     if not success then
-        -- Only log critical errors to reduce spam
         if not name or not name:find("DigLoop") then
-            addToConsole("❌ Error in " .. (name or "unknown") .. ": " .. err)
+            addToConsole("Error in " .. (name or "unknown") .. ": " .. err)
         end
     end
     return success
@@ -245,13 +373,13 @@ local function checkHiveOwnership()
         ownedHive = getOwnedHive()
         
         if ownedHive and ownedHive ~= previousHive then
-            addToConsole("🎯 New hive: " .. ownedHive)
+            addToConsole("New hive: " .. ownedHive)
             displayHiveName = "Hive"
         elseif not ownedHive and previousHive then
-            addToConsole("❌ Hive lost")
+            addToConsole("Hive lost")
             displayHiveName = "None"
         elseif ownedHive and previousHive == nil then
-            addToConsole("🎯 Hive acquired: " .. ownedHive)
+            addToConsole("Hive acquired: " .. ownedHive)
             displayHiveName = "Hive"
         end
         
@@ -259,7 +387,55 @@ local function checkHiveOwnership()
     end
 end
 
--- Movement Functions (Optimized)
+-- Improved Pathfinding with Obstacle Avoidance
+local function moveToPositionWalk(targetPos)
+    local character = player.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not humanoidRootPart then return false end
+    
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 3,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentCanClimb = true,
+        WaypointSpacing = 4,
+        Cost = {
+            Water = 10,
+            Lava = math.huge,
+            Jump = 5,
+        }
+    })
+    
+    local success, errorMessage = pcall(function()
+        path:ComputeAsync(humanoidRootPart.Position, targetPos)
+    end)
+    
+    if success and path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        for i, waypoint in ipairs(waypoints) do
+            if i > 1 then
+                humanoid:MoveTo(waypoint.Position)
+                
+                if waypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+                
+                local moveSuccess = humanoid.MoveToFinished:Wait(5)
+                if not moveSuccess then
+                    addToConsole("Path blocked, finding alternative...")
+                    break
+                end
+            end
+        end
+        return true
+    else
+        humanoid:MoveTo(targetPos)
+        humanoid.MoveToFinished:Wait(8)
+        return true
+    end
+end
+
 local function moveToPositionTween(targetPos)
     local character = player.Character
     local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -286,18 +462,6 @@ local function moveToPositionTween(targetPos)
     return true
 end
 
-local function moveToPositionWalk(targetPos)
-    local character = player.Character
-    local humanoid = character and character:FindFirstChild("Humanoid")
-    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not humanoidRootPart then return false end
-    
-    humanoid:MoveTo(targetPos)
-    humanoid.MoveToFinished:Wait(8) -- Reduced timeout
-    
-    return true
-end
-
 local function moveToPosition(targetPos)
     if toggles.movementMethod == "Tween" then
         return moveToPositionTween(targetPos)
@@ -306,7 +470,7 @@ local function moveToPosition(targetPos)
     end
 end
 
--- Auto-dig function (Optimized)
+-- Auto-dig function
 local function DigLoop()
     if digRunning then return end
     digRunning = true
@@ -317,7 +481,7 @@ local function DigLoop()
             local toolsFired = 0
             
             for _, tool in pairs(char:GetChildren()) do
-                if toolsFired >= 5 then break end -- Reduced tool usage
+                if toolsFired >= 5 then break end
                 if tool:IsA("Tool") then
                     local remote = tool:FindFirstChild("ToolRemote") or tool:FindFirstChild("Remote")
                     if remote then
@@ -327,14 +491,14 @@ local function DigLoop()
                 end
             end
             
-            task.wait(0.2) -- Reduced frequency
+            task.wait(0.2)
         end, "DigLoop")
     end
     
     digRunning = false
 end
 
--- Token Collection (Optimized)
+-- Token Collection
 local function getNearestToken()
     local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
     if not tokensFolder then return nil end
@@ -342,7 +506,7 @@ local function getNearestToken()
     for _, token in pairs(tokensFolder:GetChildren()) do
         if token:IsA("BasePart") and token:FindFirstChild("Token") and token:FindFirstChild("Collecting") and not token.Collecting.Value then
             local distance = (token.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            if distance <= 30 and not toggles.visitedTokens[token] then -- Reduced distance
+            if distance <= 30 and not toggles.visitedTokens[token] then
                 return token, distance
             end
         end
@@ -406,7 +570,7 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Lavender Hub - PART 2 (OPTIMIZED) \\--
+--// Lavender Hub - PART 2 (WITH ANTI-LAG & DEBUG) \\--
 
 -- Farming Logic
 local function startFarming()
@@ -482,7 +646,7 @@ local function startConverting()
     end
 end
 
--- Main Loop (Optimized)
+-- Main Loop
 local lastUpdateTime = 0
 local function updateFarmState()
     if not toggles.autoFarm then return end
@@ -549,7 +713,7 @@ local Window = Library:CreateWindow({
     Center = true,
     AutoShow = true,
     ShowCustomCursor = false,
-    Size = UDim2.fromOffset(600, 450), -- Smaller window
+    Size = UDim2.fromOffset(650, 500), -- Slightly larger for debug
     Resizable = false
 })
 
@@ -655,10 +819,55 @@ local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
     end
 })
 
+-- Anti-Lag Settings
+local AntiLagGroupbox = MainTab:AddRightGroupbox("Performance")
+local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
+    Text = "Anti Lag",
+    Default = false,
+    Tooltip = "Delete fruits and nature objects to reduce lag",
+    Callback = function(Value)
+        toggles.antiLag = Value
+        saveSettings()
+        if Value then
+            addToConsole("Anti-Lag enabled - cleaning objects...")
+            runAntiLag()
+        else
+            addToConsole("Anti-Lag disabled")
+        end
+    end
+})
+
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
 consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.2 - Ready", DoesWrap = true })
+
+-- Debug Tab
+local DebugTab = Window:AddTab("Debug", "bug")
+local DebugGroupbox = DebugTab:AddLeftGroupbox("Performance Stats")
+debugLabels.fps = DebugGroupbox:AddLabel("FPS: 0")
+debugLabels.memory = DebugGroupbox:AddLabel("Memory: 0 MB")
+debugLabels.objects = DebugGroupbox:AddLabel("Objects Deleted: 0")
+
+local DebugActionsGroupbox = DebugTab:AddRightGroupbox("Actions")
+DebugActionsGroupbox:AddButton("Run Anti-Lag", function()
+    if toggles.antiLag then
+        runAntiLag()
+    else
+        addToConsole("Enable Anti-Lag first")
+    end
+end)
+
+DebugActionsGroupbox:AddButton("Claim Hive", function()
+    autoClaimHive()
+end)
+
+DebugActionsGroupbox:AddButton("Clear Console", function()
+    consoleLogs = {}
+    if consoleLabel then
+        consoleLabel:SetText("Console cleared")
+    end
+end)
 
 -- Status Groupbox
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
@@ -685,12 +894,13 @@ end)
 local lastHeartbeatTime = 0
 RunService.Heartbeat:Connect(function()
     local currentTime = tick()
-    if currentTime - lastHeartbeatTime < 0.1 then return end -- Throttle updates
+    if currentTime - lastHeartbeatTime < 0.1 then return end
     lastHeartbeatTime = currentTime
     
     updateFarmState()
     updateWalkspeed()
     clearVisitedTokens()
+    updatePerformanceStats()
     
     -- Update status display
     local statusText = "Idle"
@@ -712,19 +922,20 @@ RunService.Heartbeat:Connect(function()
     PollenLabel:SetText("Pollen: " .. formatNumber(currentPollen))
 end)
 
--- Stats Update Loop (Optimized)
+-- Stats Update Loop
 local lastStatsUpdate = 0
 spawn(function()
-    while task.wait(1) do -- Reduced update frequency
+    while task.wait(1) do
         local currentPollen = getCurrentPollen()
         
         WrappedLabel:SetText(string.format(
-            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s",
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nAnti-Lag: %s",
             formatNumber(currentPollen),
             toggles.field,
             displayHiveName,
             toggles.movementMethod,
-            toggles.autoDig and "ON" or "OFF"
+            toggles.autoDig and "ON" or "OFF",
+            toggles.antiLag and "ON" or "OFF"
         ))
     end
 end)
@@ -736,15 +947,36 @@ loadSettings()
 FieldDropdown:Set(toggles.field)
 AutoFarmToggle:Set(toggles.autoFarm)
 AutoDigToggle:Set(toggles.autoDig)
+AntiLagToggle:Set(toggles.antiLag)
 MovementMethodDropdown:Set(toggles.movementMethod)
 TweenSpeedSlider:Set(toggles.tweenSpeed)
 WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
+-- Auto claim hive on startup
+spawn(function()
+    task.wait(2)
+    if not getOwnedHive() then
+        addToConsole("No hive detected, auto-claiming...")
+        autoClaimHive()
+    end
+end)
+
+-- Run anti-lag on startup if enabled
+spawn(function()
+    task.wait(3)
+    if toggles.antiLag then
+        addToConsole("Running startup Anti-Lag...")
+        runAntiLag()
+    end
+end)
+
 -- Initial console message
 addToConsole("Lavender Hub v0.2 loaded")
 addToConsole("Auto-save enabled")
 addToConsole("Continuous movement enabled")
+addToConsole("Anti-Lag system ready")
+addToConsole("Debug panel available")
 if ownedHive then
     addToConsole("Hive: " .. ownedHive)
 else
