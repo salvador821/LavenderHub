@@ -1,2 +1,0 @@
-# LavenderHub
-Bws script
