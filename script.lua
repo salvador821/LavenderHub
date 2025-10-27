@@ -1,4 +1,4 @@
---// Lavender Hub - FIXED PATHFINDING & MOVEMENT \\--
+--// Lavender Hub - SMOOTH TWEEN EDITION \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -53,7 +53,7 @@ local toggles = {
     autoFarm = false,
     autoDig = false,
     antiLag = false,
-    tweenSpeed = 50,
+    tweenSpeed = 70,
     walkspeedEnabled = false,
     walkspeed = 50,
     isFarming = false,
@@ -172,26 +172,22 @@ local function loadSettings()
     return false
 end
 
--- Simple Anti-Lag System (Original)
+-- Simple Anti-Lag System
 local function runAntiLag()
     if not toggles.antiLag then return end
     
     local targets = {
-        -- Original fruits
         "mango", "strawberry", "fence", "blueberry", "pear",
         "apple", "orange", "banana", "grape", "pineapple",
         "watermelon", "lemon", "lime", "cherry", "peach",
         "plum", "kiwi", "coconut", "avocado", "raspberry",
         "blackberry", "pomegranate", "fig", "apricot", "melon",
         "fruit", "fruits", "berry", "berries",
-        
-        -- New additions
         "daisy", "cactus", "forrest", "bamboo", "bear",
         "leader", "cave", "crystal"
     }
 
     local deleted = 0
-
     for _, obj in pairs(workspace:GetDescendants()) do
         if toggles.antiLag then
             local name = obj.Name:lower()
@@ -210,16 +206,15 @@ local function runAntiLag()
     end
 
     toggles.objectsDeleted = toggles.objectsDeleted + deleted
-    addToConsole("🌿 Deleted " .. deleted .. " laggy objects (Total: " .. toggles.objectsDeleted .. ")")
+    addToConsole("🌿 Deleted " .. deleted .. " laggy objects")
 end
 
--- Fixed Auto Claim Hive System (Runs ALL hives in order)
+-- Fixed Auto Claim Hive System
 local function autoClaimHive()
     addToConsole("🔍 Auto-claiming hives...")
     
     local claimRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ClaimHive")
     
-    -- Claim ALL hives in order 1-6
     for i = 1, 6 do
         local hiveName = "Hive_" .. i
         addToConsole("🔄 Claiming " .. hiveName .. "...")
@@ -236,18 +231,17 @@ local function autoClaimHive()
             addToConsole("❌ Failed to claim " .. hiveName)
         end
         
-        task.wait(0.5) -- Small delay between claims
+        task.wait(0.5)
     end
     
     addToConsole("🎉 Finished auto-claiming all hives")
     
-    -- Check which hive we actually got
-    task.wait(2) -- Wait for claims to process
+    task.wait(2)
     local ownedHive = getOwnedHive()
     if ownedHive then
         addToConsole("🏠 Successfully claimed: " .. ownedHive)
     else
-        addToConsole("💔 No hive claimed - all might be taken")
+        addToConsole("💔 No hive claimed")
     end
 end
 
@@ -261,52 +255,9 @@ local function updatePerformanceStats()
         toggles.performanceStats.memory = math.floor(memory:GetValue() / 1024 / 1024)
     end
     
-    -- Update debug display
-    if debugLabels.fps then
-        debugLabels.fps:SetText("FPS: " .. toggles.performanceStats.fps)
-    end
-    if debugLabels.memory then
-        debugLabels.memory:SetText("Memory: " .. toggles.performanceStats.memory .. " MB")
-    end
-    if debugLabels.objects then
-        debugLabels.objects:SetText("Objects Deleted: " .. toggles.objectsDeleted)
-    end
-end
-
--- Optimized Movement Functions
-local function getRandomPositionInField()
-    local fieldPos = fieldCoords[toggles.field]
-    if not fieldPos then return nil end
-    
-    local fieldRadius = 25
-    local randomX = fieldPos.X + math.random(-fieldRadius, fieldRadius)
-    local randomZ = fieldPos.Z + math.random(-fieldRadius, fieldRadius)
-    local randomY = fieldPos.Y
-    
-    return Vector3.new(randomX, randomY, randomZ)
-end
-
-local function performContinuousMovement()
-    if not toggles.atField or toggles.isConverting or toggles.isMoving then return end
-    
-    local randomPos = getRandomPositionInField()
-    if randomPos then
-        toggles.isMoving = true
-        toggles.currentTarget = randomPos
-        
-        local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:MoveTo(randomPos)
-            spawn(function()
-                task.wait(2)
-                toggles.isMoving = false
-                toggles.currentTarget = nil
-            end)
-        else
-            toggles.isMoving = false
-            toggles.currentTarget = nil
-        end
-    end
+    if debugLabels.fps then debugLabels.fps:SetText("FPS: " .. toggles.performanceStats.fps) end
+    if debugLabels.memory then debugLabels.memory:SetText("Memory: " .. toggles.performanceStats.memory .. " MB") end
+    if debugLabels.objects then debugLabels.objects:SetText("Objects Deleted: " .. toggles.objectsDeleted) end
 end
 
 -- Utility Functions
@@ -317,9 +268,7 @@ end
 local function SafeCall(func, name)
     local success, err = pcall(func)
     if not success then
-        if not name or not name:find("DigLoop") then
-            addToConsole("Error in " .. (name or "unknown") .. ": " .. err)
-        end
+        addToConsole("Error in " .. (name or "unknown") .. ": " .. err)
     end
     return success
 end
@@ -379,20 +328,110 @@ local function checkHiveOwnership()
         toggles.lastHiveCheckTime = tick()
     end
 end
--- FIXED PATHFINDING WITH BETTER OBSTACLE AVOIDANCE
+-- SMOOTH TWEEN MOVEMENT SYSTEM (Like Field Teleporter)
+local function smoothTweenToPosition(targetPos)
+    local character = GetCharacter()
+    local humanoid = character:FindFirstChild("Humanoid")
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not humanoidRootPart then return false end
+
+    local SPEED = toggles.tweenSpeed
+    local TARGET_HEIGHT = 3
+    local ANTI_FLING_FORCE = Vector3.new(0, -5, 0)
+    
+    local startPos = humanoidRootPart.Position
+    local adjustedTargetPos = Vector3.new(
+        targetPos.X,
+        targetPos.Y + TARGET_HEIGHT,
+        targetPos.Z
+    )
+    local originalLookVector = humanoidRootPart.CFrame.LookVector
+    
+    local directDistance = (startPos - adjustedTargetPos).Magnitude
+    local duration = directDistance / SPEED
+    
+    humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+    humanoid.AutoRotate = false
+    
+    if humanoidRootPart:FindFirstChild("MovementActive") then
+        humanoidRootPart.MovementActive:Destroy()
+    end
+    
+    local movementTracker = Instance.new("BoolValue")
+    movementTracker.Name = "MovementActive"
+    movementTracker.Parent = humanoidRootPart
+    
+    local movementCompleted = false
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        if not movementTracker.Parent then
+            connection:Disconnect()
+            return
+        end
+        
+        local progress = math.min((tick() - startTime) / duration, 1)
+        local currentPos = startPos + (adjustedTargetPos - startPos) * progress
+        
+        currentPos = Vector3.new(
+            currentPos.X,
+            startPos.Y + (adjustedTargetPos.Y - startPos.Y) * progress,
+            currentPos.Z
+        )
+        
+        humanoidRootPart.CFrame = CFrame.new(currentPos, currentPos + originalLookVector)
+        
+        humanoidRootPart.Velocity = progress > 0.9 and ANTI_FLING_FORCE or Vector3.new(0, math.min(humanoidRootPart.Velocity.Y, 0), 0)
+        
+        if progress >= 1 then
+            connection:Disconnect()
+            movementTracker:Destroy()
+            humanoid.AutoRotate = true
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
+            
+            local currentOrientation = humanoidRootPart.CFrame.Rotation
+            humanoidRootPart.CFrame = CFrame.new(
+                targetPos.X,
+                targetPos.Y + TARGET_HEIGHT,
+                targetPos.Z
+            ) * currentOrientation
+            
+            humanoidRootPart.Velocity = Vector3.zero
+            task.wait(0.1)
+            humanoidRootPart.Velocity = Vector3.zero
+            movementCompleted = true
+        end
+    end)
+    
+    character.AncestryChanged:Connect(function()
+        if not character.Parent then
+            connection:Disconnect()
+            if movementTracker.Parent then 
+                movementTracker:Destroy() 
+            end
+        end
+    end)
+    
+    -- Wait for movement to complete with timeout
+    local startTime = tick()
+    while not movementCompleted and tick() - startTime < duration + 5 do
+        task.wait(0.1)
+    end
+    
+    return movementCompleted
+end
+
+-- Simple Walk Movement (Fallback)
 local function moveToPositionWalk(targetPos)
     local character = GetCharacter()
     local humanoid = character:FindFirstChild("Humanoid")
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
     if not humanoid or not humanoidRootPart then return false end
     
-    -- Simple direct movement with timeout
     humanoid:MoveTo(targetPos)
     
     local startTime = tick()
-    while (humanoidRootPart.Position - targetPos).Magnitude > 15 do
+    while (humanoidRootPart.Position - targetPos).Magnitude > 10 do
         if tick() - startTime > 15 then
-            addToConsole("Walk movement timeout")
             return false
         end
         task.wait(0.1)
@@ -401,76 +440,55 @@ local function moveToPositionWalk(targetPos)
     return true
 end
 
--- SUPER SMOOTH TWEEN MOVEMENT
-local function moveToPositionTween(targetPos)
-    local character = GetCharacter()
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return false end
-
-    -- Get proper ground position using raycast
-    local rayOrigin = Vector3.new(targetPos.X, targetPos.Y + 50, targetPos.Z)
-    local rayDirection = Vector3.new(0, -100, 0)
-    local raycastResult = workspace:Raycast(rayOrigin, rayDirection)
-    if raycastResult then
-        targetPos = Vector3.new(targetPos.X, raycastResult.Position.Y + 3, targetPos.Z)
-    end
-
-    local distance = (humanoidRootPart.Position - targetPos).Magnitude
-    local speed = toggles.tweenSpeed
-    local duration = distance / speed
-    
-    -- Very smooth tween
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.Out,
-        0,
-        false,
-        0
-    )
-    
-    local targetCFrame = CFrame.new(targetPos)
-    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
-    
-    tween:Play()
-    
-    local startTime = tick()
-    while tween.PlaybackState == Enum.PlaybackState.Playing do
-        if tick() - startTime > duration + 10 then
-            tween:Cancel()
-            addToConsole("Tween movement timeout")
-            return false
-        end
-        task.wait()
-    end
-    
-    return true
-end
-
--- MAIN MOVEMENT FUNCTION WITH RETRY LOGIC
+-- Main Movement Function
 local function moveToPosition(targetPos)
     toggles.isMoving = true
     
     local success = false
-    local retries = 0
-    local maxRetries = 2
-    
-    while retries <= maxRetries and not success do
-        if toggles.movementMethod == "Tween" then
-            success = moveToPositionTween(targetPos)
-        else
-            success = moveToPositionWalk(targetPos)
-        end
-        
-        if not success then
-            retries = retries + 1
-            addToConsole("Movement failed, retry " .. retries .. "/" .. maxRetries)
-            task.wait(1)
-        end
+    if toggles.movementMethod == "Tween" then
+        success = smoothTweenToPosition(targetPos)
+    else
+        success = moveToPositionWalk(targetPos)
     end
     
     toggles.isMoving = false
     return success
+end
+
+-- Optimized Movement Functions
+local function getRandomPositionInField()
+    local fieldPos = fieldCoords[toggles.field]
+    if not fieldPos then return nil end
+    
+    local fieldRadius = 25
+    local randomX = fieldPos.X + math.random(-fieldRadius, fieldRadius)
+    local randomZ = fieldPos.Z + math.random(-fieldRadius, fieldRadius)
+    local randomY = fieldPos.Y
+    
+    return Vector3.new(randomX, randomY, randomZ)
+end
+
+local function performContinuousMovement()
+    if not toggles.atField or toggles.isConverting or toggles.isMoving then return end
+    
+    local randomPos = getRandomPositionInField()
+    if randomPos then
+        toggles.isMoving = true
+        toggles.currentTarget = randomPos
+        
+        local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:MoveTo(randomPos)
+            spawn(function()
+                task.wait(2)
+                toggles.isMoving = false
+                toggles.currentTarget = nil
+            end)
+        else
+            toggles.isMoving = false
+            toggles.currentTarget = nil
+        end
+    end
 end
 
 -- Auto-dig function
@@ -573,7 +591,6 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
-
 -- Farming Logic
 local function startFarming()
     if not toggles.autoFarm or toggles.isFarming or not ownedHive then return end
@@ -595,7 +612,7 @@ local function startFarming()
     
     addToConsole("Moving to: " .. toggles.field)
     
-    -- Move to field
+    -- Move to field with smooth tween
     if moveToPosition(fieldPos) then
         toggles.atField = true
         local initialPollen = getCurrentPollen()
@@ -630,7 +647,7 @@ local function startConverting()
     
     addToConsole("Moving to hive")
     
-    -- Move to hive
+    -- Move to hive with smooth tween
     if moveToPosition(hivePos) then
         toggles.atHive = true
         addToConsole("✅ At hive")
@@ -703,14 +720,15 @@ local function clearVisitedTokens()
         toggles.lastTokenClearTime = tick()
     end
 end
--- GUI Setup (SAME AS YOUR ORIGINAL)
+
+-- GUI Setup (Your Original GUI)
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub - FIXED",
-    Footer = "v0.3 - Smooth Movement",
+    Title = "Lavender Hub - SMOOTH",
+    Footer = "v1.0 - Smooth Tween",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -782,9 +800,9 @@ local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
 
 local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
     Text = "Tween Speed",
-    Default = 50,
-    Min = 10,
-    Max = 100,
+    Default = 70,
+    Min = 30,
+    Max = 150,
     Rounding = 1,
     Compact = true,
     Callback = function(Value)
@@ -842,7 +860,7 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.3 - Ready", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Smooth Tween Ready", DoesWrap = true })
 
 -- Debug Tab
 local DebugTab = Window:AddTab("Debug", "bug")
@@ -925,7 +943,6 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- Stats Update Loop
-local lastStatsUpdate = 0
 spawn(function()
     while task.wait(1) do
         local currentPollen = getCurrentPollen()
@@ -956,34 +973,4 @@ WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
 -- AUTO CLAIM ALL HIVES ON STARTUP
-addToConsole("🚀 Lavender Hub v0.3 starting...")
-addToConsole("🔄 Auto-claiming hives before starting...")
-
--- Run auto claim FIRST before anything else
-autoClaimHive()
-
--- Wait a bit for claims to process
-task.wait(3)
-
--- Update owned hive after claiming
-ownedHive = getOwnedHive()
-displayHiveName = ownedHive and "Hive" or "None"
-
--- Run anti-lag on startup if enabled
-if toggles.antiLag then
-    addToConsole("Running startup Anti-Lag...")
-    runAntiLag()
-end
-
--- Initial console message
-addToConsole("Lavender Hub v0.3 loaded")
-addToConsole("✅ SMOOTH MOVEMENT ENABLED")
-addToConsole("✅ PATHFINDING FIXED")
-addToConsole("Auto-save enabled")
-addToConsole("Anti-Lag system ready")
-addToConsole("Auto-claim completed")
-if ownedHive then
-    addToConsole("🏠 Owned Hive: " .. ownedHive)
-else
-    addToConsole("💔 No hive owned")
-end
+addToConsole("🚀 Lavender Hub v1.0 - Smooth Tween Starting...")
