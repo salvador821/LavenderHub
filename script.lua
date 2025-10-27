@@ -1,4 +1,4 @@
---// Lavender Hub - PART 1 (FIXED AUTO CLAIM) \\--
+--// Lavender Hub - PART 1 (FIXED PATHFINDING) \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -186,7 +186,7 @@ local function runAntiLag()
         "fruit", "fruits", "berry", "berries",
         
         -- New additions
-        "daisy", "cactus", "forrest", "bamboo", "rock",
+        "daisy", "cactus", "forrest", "bamboo", "bear",
         "leader", "cave", "crystal"
     }
 
@@ -379,24 +379,31 @@ local function checkHiveOwnership()
         toggles.lastHiveCheckTime = tick()
     end
 end
-
--- Improved Pathfinding with Obstacle Avoidance
+-- Improved Pathfinding with Better Obstacle Avoidance
 local function moveToPositionWalk(targetPos)
     local character = player.Character
     local humanoid = character and character:FindFirstChild("Humanoid")
     local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not humanoid or not humanoidRootPart then return false end
     
+    -- Check if we're already close to the target
+    local distance = (humanoidRootPart.Position - targetPos).Magnitude
+    if distance < 10 then
+        humanoid:MoveTo(targetPos)
+        humanoid.MoveToFinished:Wait(3)
+        return true
+    end
+    
     local path = PathfindingService:CreatePath({
-        AgentRadius = 3,
+        AgentRadius = 2,
         AgentHeight = 5,
         AgentCanJump = true,
         AgentCanClimb = true,
-        WaypointSpacing = 4,
+        WaypointSpacing = 6,
         Cost = {
-            Water = 10,
+            Water = 20,
             Lava = math.huge,
-            Jump = 5,
+            Jump = 8,
         }
     })
     
@@ -406,39 +413,59 @@ local function moveToPositionWalk(targetPos)
     
     if success and path.Status == Enum.PathStatus.Success then
         local waypoints = path:GetWaypoints()
+        
         for i, waypoint in ipairs(waypoints) do
-            if i > 1 then
+            if i > 1 then -- Skip first waypoint (current position)
                 humanoid:MoveTo(waypoint.Position)
                 
                 if waypoint.Action == Enum.PathWaypointAction.Jump then
                     humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
                 end
                 
-                local moveSuccess = humanoid.MoveToFinished:Wait(5)
+                local moveSuccess = humanoid.MoveToFinished:Wait(4)
                 if not moveSuccess then
-                    addToConsole("Path blocked, finding alternative...")
+                    -- If path is blocked, try direct movement as fallback
+                    addToConsole("Path blocked, using direct movement")
+                    humanoid:MoveTo(targetPos)
+                    humanoid.MoveToFinished:Wait(5)
                     break
                 end
             end
         end
         return true
     else
+        -- Fallback to direct movement if pathfinding fails
+        addToConsole("Pathfinding failed, using direct movement")
         humanoid:MoveTo(targetPos)
         humanoid.MoveToFinished:Wait(8)
         return true
     end
 end
 
+-- Smoother Tween Movement with Height Adjustment
 local function moveToPositionTween(targetPos)
     local character = player.Character
     local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not humanoidRootPart then return false end
 
+    -- Adjust target position height to avoid going underground
+    local rayOrigin = Vector3.new(targetPos.X, targetPos.Y + 50, targetPos.Z)
+    local rayDirection = Vector3.new(0, -100, 0)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {character}
+    
+    local raycastResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+    if raycastResult then
+        targetPos = Vector3.new(targetPos.X, raycastResult.Position.Y + 3, targetPos.Z)
+    end
+
     local distance = (humanoidRootPart.Position - targetPos).Magnitude
-    local baseSpeed = 20
-    local speedMultiplier = (toggles.tweenSpeed / 6) * 1.5
+    local baseSpeed = 25
+    local speedMultiplier = (toggles.tweenSpeed / 6) * 1.2
     local duration = distance / (baseSpeed * speedMultiplier)
     
+    -- Use smoother easing for better movement
     local tweenInfo = TweenInfo.new(
         duration,
         Enum.EasingStyle.Quad,
@@ -448,19 +475,73 @@ local function moveToPositionTween(targetPos)
         0
     )
     
-    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
-    tween:Play()
-    tween.Completed:Wait()
+    local targetCFrame = CFrame.new(targetPos)
+    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
     
-    return true
+    -- Add movement cancellation support
+    local movementCancelled = false
+    local connection
+    
+    local function cleanup()
+        if connection then
+            connection:Disconnect()
+        end
+        if tween then
+            tween:Cancel()
+        end
+    end
+    
+    -- Cancel movement if character changes or script stops
+    connection = player.CharacterAdded:Connect(function()
+        movementCancelled = true
+        cleanup()
+    end)
+    
+    tween:Play()
+    
+    -- Wait for tween completion with timeout
+    local startTime = tick()
+    while tween.PlaybackState == Enum.PlaybackState.Playing do
+        if tick() - startTime > duration + 5 then -- 5 second timeout
+            movementCancelled = true
+            cleanup()
+            break
+        end
+        if not toggles.autoFarm then
+            movementCancelled = true
+            cleanup()
+            break
+        end
+        task.wait()
+    end
+    
+    if connection then
+        connection:Disconnect()
+    end
+    
+    return not movementCancelled
 end
 
-local function moveToPosition(targetPos)
-    if toggles.movementMethod == "Tween" then
-        return moveToPositionTween(targetPos)
-    else
-        return moveToPositionWalk(targetPos)
+-- Smart Movement Function with Retry Logic
+local function moveToPosition(targetPos, maxRetries = 2)
+    local retries = 0
+    local success = false
+    
+    while retries <= maxRetries and not success do
+        if toggles.movementMethod == "Tween" then
+            success = moveToPositionTween(targetPos)
+        else
+            success = moveToPositionWalk(targetPos)
+        end
+        
+        if not success then
+            retries = retries + 1
+            addToConsole("Movement failed, retry " .. retries .. "/" .. maxRetries)
+            task.wait(1)
+        end
     end
+    
+    return success
 end
 
 -- Auto-dig function
@@ -563,7 +644,7 @@ local function shouldReturnToField()
     local currentPollen = getCurrentPollen()
     return currentPollen == 0
 end
---// Lavender Hub - PART 2 (FIXED AUTO CLAIM) \\--
+--// Lavender Hub - PART 2 (FIXED PATHFINDING) \\--
 
 -- Farming Logic
 local function startFarming()
@@ -586,7 +667,7 @@ local function startFarming()
     
     addToConsole("Moving to: " .. toggles.field)
     
-    -- Move to field
+    -- Move to field with improved pathfinding
     if moveToPosition(fieldPos) then
         toggles.atField = true
         local initialPollen = getCurrentPollen()
@@ -603,6 +684,7 @@ local function startFarming()
         end
     else
         toggles.isFarming = false
+        addToConsole("Failed to reach field")
     end
 end
 
@@ -620,7 +702,7 @@ local function startConverting()
     
     addToConsole("Moving to hive")
     
-    -- Move to hive
+    -- Move to hive with improved pathfinding
     if moveToPosition(hivePos) then
         toggles.atHive = true
         addToConsole("At hive")
@@ -636,6 +718,7 @@ local function startConverting()
         end
     else
         toggles.isConverting = false
+        addToConsole("Failed to reach hive")
     end
 end
 
@@ -893,84 +976,50 @@ RunService.Heartbeat:Connect(function()
     
     -- Update status display
     local statusText = "Idle"
-    local currentPollen = getCurrentPollen()
-    
-    if toggles.autoFarm then
-        if toggles.isFarming and toggles.atField then
-            statusText = "Farming"
-        elseif toggles.isConverting and toggles.atHive then
-            statusText = "Converting"
-        elseif toggles.isFarming then
-            statusText = "Moving to Field"
-        elseif toggles.isConverting then
-            statusText = "Moving to Hive"
-        end
-    end
+    if toggles.isFarming then statusText = "Farming" end
+    if toggles.isConverting then statusText = "Converting" end
+    if toggles.isMoving then statusText = "Moving" end
     
     StatusLabel:SetText("Status: " .. statusText)
-    PollenLabel:SetText("Pollen: " .. formatNumber(currentPollen))
+    PollenLabel:SetText("Pollen: " .. formatNumber(getCurrentPollen()))
+    
+    -- Update home stats
+    WrappedLabel:SetText(string.format(
+        "Field: %s\nMethod: %s\nStatus: %s\nPollen: %s\nHive: %s\nFPS: %d\nMemory: %d MB",
+        toggles.field,
+        toggles.movementMethod,
+        statusText,
+        formatNumber(getCurrentPollen()),
+        displayHiveName,
+        toggles.performanceStats.fps,
+        toggles.performanceStats.memory
+    ))
 end)
 
--- Stats Update Loop
-local lastStatsUpdate = 0
+-- Auto-save every 30 seconds
 spawn(function()
-    while task.wait(1) do
-        local currentPollen = getCurrentPollen()
-        
-        WrappedLabel:SetText(string.format(
-            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nAnti-Lag: %s",
-            formatNumber(currentPollen),
-            toggles.field,
-            displayHiveName,
-            toggles.movementMethod,
-            toggles.autoDig and "ON" or "OFF",
-            toggles.antiLag and "ON" or "OFF"
-        ))
+    while task.wait(30) do
+        saveSettings()
     end
 end)
 
--- Load settings on startup
+-- Initialization
+addToConsole("Lavender Hub v0.2 loaded")
 loadSettings()
 
--- Apply loaded settings to GUI
+-- Apply loaded settings to UI
 FieldDropdown:Set(toggles.field)
+MovementMethodDropdown:Set(toggles.movementMethod)
 AutoFarmToggle:Set(toggles.autoFarm)
 AutoDigToggle:Set(toggles.autoDig)
 AntiLagToggle:Set(toggles.antiLag)
-MovementMethodDropdown:Set(toggles.movementMethod)
-TweenSpeedSlider:Set(toggles.tweenSpeed)
 WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
+TweenSpeedSlider:Set(toggles.tweenSpeed)
 
--- AUTO CLAIM ALL HIVES ON STARTUP (IMMEDIATELY - BLOCKS SCRIPT UNTIL DONE)
-addToConsole("🚀 Lavender Hub v0.2 starting...")
-addToConsole("🔄 Auto-claiming hives before starting...")
+addToConsole("Settings applied")
+addToConsole("Ready to farm!")
 
--- Run auto claim FIRST before anything else
+-- Auto-claim hive on startup
+task.wait(2)
 autoClaimHive()
-
--- Wait a bit for claims to process
-task.wait(3)
-
--- Update owned hive after claiming
-ownedHive = getOwnedHive()
-displayHiveName = ownedHive and "Hive" or "None"
-
--- Run anti-lag on startup if enabled
-if toggles.antiLag then
-    addToConsole("Running startup Anti-Lag...")
-    runAntiLag()
-end
-
--- Initial console message
-addToConsole("Lavender Hub v0.2 loaded")
-addToConsole("Auto-save enabled")
-addToConsole("Continuous movement enabled")
-addToConsole("Anti-Lag system ready")
-addToConsole("Debug panel available")
-addToConsole("Auto-claim completed")
-if ownedHive then
-    addToConsole("🏠 Owned Hive: " .. ownedHive)
-else
-    addToConsole("💔 No hive owned")
-end
