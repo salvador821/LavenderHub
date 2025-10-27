@@ -180,7 +180,7 @@ local function runAntiLag()
         "plum", "kiwi", "coconut", "avocado", "raspberry",
         "blackberry", "pomegranate", "fig", "apricot", "melon",
         "fruit", "fruits", "berry", "berries",
-        "daisy", "cactus", "forrest", "bamboo", "bear",
+        "daisy", "cactus", "forrest", "bamboo", "forrest",
         "leader", "cave", "crystal"
     }
 
