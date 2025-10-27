@@ -1,4 +1,4 @@
---// Lavender Hub - SMOOTH TWEEN EDITION \\--
+--// Lavender Hub - SMOOTH TWEEN FIXED \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -96,9 +96,6 @@ local consoleLabel = nil
 
 -- Debug System
 local debugLabels = {}
-
--- Auto-Save System
-local saveData = {}
 
 local function addToConsole(message)
     local timestamp = os.date("%H:%M:%S")
@@ -328,7 +325,7 @@ local function checkHiveOwnership()
         toggles.lastHiveCheckTime = tick()
     end
 end
--- SMOOTH TWEEN MOVEMENT SYSTEM (Like Field Teleporter)
+-- FIXED SMOOTH TWEEN MOVEMENT SYSTEM
 local function smoothTweenToPosition(targetPos)
     local character = GetCharacter()
     local humanoid = character:FindFirstChild("Humanoid")
@@ -362,6 +359,8 @@ local function smoothTweenToPosition(targetPos)
     movementTracker.Parent = humanoidRootPart
     
     local movementCompleted = false
+    local startTime = tick() -- FIXED: Moved this before the connection
+    
     local connection
     connection = RunService.Heartbeat:Connect(function()
         if not movementTracker.Parent then
@@ -412,8 +411,8 @@ local function smoothTweenToPosition(targetPos)
     end)
     
     -- Wait for movement to complete with timeout
-    local startTime = tick()
-    while not movementCompleted and tick() - startTime < duration + 5 do
+    local waitStart = tick()
+    while not movementCompleted and tick() - waitStart < duration + 5 do
         task.wait(0.1)
     end
     
@@ -721,14 +720,14 @@ local function clearVisitedTokens()
     end
 end
 
--- GUI Setup (Your Original GUI)
+-- GUI Setup
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
     Title = "Lavender Hub - SMOOTH",
-    Footer = "v1.0 - Smooth Tween",
+    Footer = "v1.0 - Fixed Tween",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -860,7 +859,7 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Smooth Tween Ready", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Fixed Tween Ready", DoesWrap = true })
 
 -- Debug Tab
 local DebugTab = Window:AddTab("Debug", "bug")
@@ -973,4 +972,26 @@ WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
 -- AUTO CLAIM ALL HIVES ON STARTUP
-addToConsole("🚀 Lavender Hub v1.0 - Smooth Tween Starting...")
+addToConsole("🚀 Lavender Hub v1.0 - Fixed Tween Starting...")
+addToConsole("🔄 Auto-claiming hives...")
+autoClaimHive()
+
+task.wait(3)
+
+-- Update owned hive after claiming
+ownedHive = getOwnedHive()
+displayHiveName = ownedHive and "Hive" or "None"
+
+-- Run anti-lag on startup if enabled
+if toggles.antiLag then
+    addToConsole("Running startup Anti-Lag...")
+    runAntiLag()
+end
+
+addToConsole("✅ Smooth Tween System Ready!")
+addToConsole("🎯 Auto Farm System Ready!")
+if ownedHive then
+    addToConsole("🏠 Owned Hive: " .. ownedHive)
+else
+    addToConsole("💔 No hive owned")
+end
