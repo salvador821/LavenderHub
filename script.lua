@@ -756,8 +756,8 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub - SMOOTH",
-    Footer = "v1.0 - Fixed Tween",
+    Title = "Lavender Hub",
+    Footer = "v0.3(DAVI IS A FEMBOY)",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -904,7 +904,7 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Fixed Tween Ready", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.3(DAVI IS A FEMBOY)", DoesWrap = true })
 
 -- Debug Tab
 local DebugTab = Window:AddTab("Debug", "bug")
