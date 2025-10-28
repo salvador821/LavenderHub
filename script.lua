@@ -180,7 +180,7 @@ local function runAntiLag()
         "plum", "kiwi", "coconut", "avocado", "raspberry",
         "blackberry", "pomegranate", "fig", "apricot", "melon",
         "fruit", "fruits", "berry", "berries",
-        "daisy", "cactus", "forrest", "bamboo", "forrest",
+        "daisy", "cactus", "forrest", "bamboo", "bear",
         "leader", "cave", "crystal"
     }
 
@@ -490,16 +490,47 @@ local function performContinuousMovement()
     end
 end
 
--- Auto-dig function
+-- Auto-dig function with tool equipping
+local function equipAllTools()
+    local character = GetCharacter()
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    if not humanoid then return end
+    
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return end
+    
+    for _, tool in pairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            humanoid:EquipTool(tool)
+            task.wait(0.05) -- Small delay to prevent issues
+        end
+    end
+end
+
 local function DigLoop()
     if digRunning then return end
     digRunning = true
+    
+    -- Equip tools once when starting auto-dig
+    if toggles.autoDig then
+        equipAllTools()
+    end
+    
+    local lastEquipTime = 0
+    local EQUIP_INTERVAL = 10 -- Re-equip tools every 10 seconds
     
     while toggles.autoDig and toggles.atField and not toggles.isConverting do
         SafeCall(function()
             local char = GetCharacter()
             local toolsFired = 0
             
+            -- Re-equip tools periodically
+            if tick() - lastEquipTime >= EQUIP_INTERVAL then
+                equipAllTools()
+                lastEquipTime = tick()
+            end
+            
+            -- Fire tools
             for _, tool in pairs(char:GetChildren()) do
                 if toolsFired >= 3 then break end
                 if tool:IsA("Tool") then
@@ -726,8 +757,8 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub",
-    Footer = "v0.3 (DAVI IS A FEMBOY)",
+    Title = "Lavender Hub - SMOOTH",
+    Footer = "v1.0 - Fixed Tween",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
