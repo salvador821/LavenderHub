@@ -52,6 +52,7 @@ local toggles = {
     movementMethod = "Tween",
     autoFarm = false,
     autoDig = false,
+    autoEquip = false,
     antiLag = false,
     tweenSpeed = 70,
     walkspeedEnabled = false,
@@ -119,6 +120,7 @@ local function saveSettings()
         movementMethod = toggles.movementMethod,
         autoFarm = toggles.autoFarm,
         autoDig = toggles.autoDig,
+        autoEquip = toggles.autoEquip,
         antiLag = toggles.antiLag,
         tweenSpeed = toggles.tweenSpeed,
         walkspeedEnabled = toggles.walkspeedEnabled,
@@ -157,6 +159,7 @@ local function loadSettings()
             toggles.movementMethod = decoded.movementMethod or toggles.movementMethod
             toggles.autoFarm = decoded.autoFarm or toggles.autoFarm
             toggles.autoDig = decoded.autoDig or toggles.autoDig
+            toggles.autoEquip = decoded.autoEquip or toggles.autoEquip
             toggles.antiLag = decoded.antiLag or toggles.antiLag
             toggles.tweenSpeed = decoded.tweenSpeed or toggles.tweenSpeed
             toggles.walkspeedEnabled = decoded.walkspeedEnabled or toggles.walkspeedEnabled
@@ -490,7 +493,7 @@ local function performContinuousMovement()
     end
 end
 
--- Auto-dig function with tool equipping
+-- Auto Equip Tools Function
 local function equipAllTools()
     local character = GetCharacter()
     local humanoid = character and character:FindFirstChild("Humanoid")
@@ -507,30 +510,26 @@ local function equipAllTools()
     end
 end
 
+-- Auto Equip Loop
+local lastEquipTime = 0
+local function autoEquipTools()
+    if not toggles.autoEquip then return end
+    if tick() - lastEquipTime < 10 then return end
+    
+    equipAllTools()
+    lastEquipTime = tick()
+end
+
+-- Auto-dig function
 local function DigLoop()
     if digRunning then return end
     digRunning = true
-    
-    -- Equip tools once when starting auto-dig
-    if toggles.autoDig then
-        equipAllTools()
-    end
-    
-    local lastEquipTime = 0
-    local EQUIP_INTERVAL = 10 -- Re-equip tools every 10 seconds
     
     while toggles.autoDig and toggles.atField and not toggles.isConverting do
         SafeCall(function()
             local char = GetCharacter()
             local toolsFired = 0
             
-            -- Re-equip tools periodically
-            if tick() - lastEquipTime >= EQUIP_INTERVAL then
-                equipAllTools()
-                lastEquipTime = tick()
-            end
-            
-            -- Fire tools
             for _, tool in pairs(char:GetChildren()) do
                 if toolsFired >= 3 then break end
                 if tool:IsA("Tool") then
@@ -815,6 +814,21 @@ local AutoDigToggle = FarmingGroupbox:AddToggle("AutoDigToggle", {
     end
 })
 
+local AutoEquipToggle = FarmingGroupbox:AddToggle("AutoEquipToggle", {
+    Text = "Auto Equip Tools",
+    Default = false,
+    Callback = function(Value)
+        toggles.autoEquip = Value
+        saveSettings()
+        if Value then
+            addToConsole("Auto Equip Tools enabled")
+            equipAllTools()
+        else
+            addToConsole("Auto Equip Tools disabled")
+        end
+    end
+})
+
 -- Movement Settings
 local MovementGroupbox = MainTab:AddRightGroupbox("Movement")
 local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
@@ -919,6 +933,11 @@ DebugActionsGroupbox:AddButton("Claim Hive", function()
     autoClaimHive()
 end)
 
+DebugActionsGroupbox:AddButton("Equip Tools", function()
+    equipAllTools()
+    addToConsole("Manually equipped all tools")
+end)
+
 -- Status Groupbox
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
 local StatusLabel = StatusGroupbox:AddLabel("Status: Idle")
@@ -951,6 +970,7 @@ RunService.Heartbeat:Connect(function()
     updateWalkspeed()
     clearVisitedTokens()
     updatePerformanceStats()
+    autoEquipTools() -- Added auto equip tools here
     
     -- Update status display
     local statusText = "Idle"
@@ -978,12 +998,13 @@ spawn(function()
         local currentPollen = getCurrentPollen()
         
         WrappedLabel:SetText(string.format(
-            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nAnti-Lag: %s",
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nAnti-Lag: %s",
             formatNumber(currentPollen),
             toggles.field,
             displayHiveName,
             toggles.movementMethod,
             toggles.autoDig and "ON" or "OFF",
+            toggles.autoEquip and "ON" or "OFF",
             toggles.antiLag and "ON" or "OFF"
         ))
     end
@@ -996,6 +1017,7 @@ loadSettings()
 FieldDropdown:Set(toggles.field)
 AutoFarmToggle:Set(toggles.autoFarm)
 AutoDigToggle:Set(toggles.autoDig)
+AutoEquipToggle:Set(toggles.autoEquip)
 AntiLagToggle:Set(toggles.antiLag)
 MovementMethodDropdown:Set(toggles.movementMethod)
 TweenSpeedSlider:Set(toggles.tweenSpeed)
