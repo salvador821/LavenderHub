@@ -726,8 +726,8 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub - SMOOTH",
-    Footer = "v1.0 - Fixed Tween",
+    Title = "Lavender Hub",
+    Footer = "v0.3 (DAVI IS A FEMBOY)",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
