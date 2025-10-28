@@ -32,8 +32,8 @@ local fieldCoords = {
     ["Clover Field"] = Vector3.new(-1638.08, 146.85, -487.75),
     ["Bamboo Field"] = Vector3.new(-1638.96, 117.49, -163.70),
     ["Glitch Field"] = Vector3.new(-2568.07, 168.00, -429.88),
-    ["Cave Field"] = Vector3.new(-1995.52, 71.78, -63.91),
-    ["Mountain Field"] = Vector3.new(-1995.52, 71.78, -63.91)
+    ["Cave Field"] = Vector3.new(-2093.76, 191.30, -567.17),
+    ["Mountain Field"] = Vector3.new(-1986.87, 236.44, -516.52)
 }
 
 -- Hive Coordinates
