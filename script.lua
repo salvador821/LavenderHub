@@ -183,7 +183,7 @@ local function runAntiLag()
         "plum", "kiwi", "coconut", "avocado", "raspberry",
         "blackberry", "pomegranate", "fig", "apricot", "melon",
         "fruit", "fruits", "berry", "berries",
-        "daisy", "cactus", "forrest", "bamboo", "bear",
+        "daisy", "cactus", "forrest", "bamboo",
         "leader", "cave", "crystal"
     }
 
@@ -422,24 +422,82 @@ local function smoothTweenToPosition(targetPos)
     return movementCompleted
 end
 
--- Simple Walk Movement (Fallback)
+-- Improved Walk Movement with Pathfinding
 local function moveToPositionWalk(targetPos)
     local character = GetCharacter()
     local humanoid = character:FindFirstChild("Humanoid")
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
     if not humanoid or not humanoidRootPart then return false end
     
-    humanoid:MoveTo(targetPos)
+    -- Create path using PathfindingService
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        WaypointSpacing = 4,
+        Costs = {}
+    })
     
-    local startTime = tick()
-    while (humanoidRootPart.Position - targetPos).Magnitude > 10 do
-        if tick() - startTime > 15 then
-            return false
+    local startPos = humanoidRootPart.Position
+    local success = pcall(function()
+        path:ComputeAsync(startPos, targetPos)
+    end)
+    
+    if success and path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        
+        for i, waypoint in ipairs(waypoints) do
+            if i > 1 then -- Skip first waypoint (current position)
+                humanoid:MoveTo(waypoint.Position)
+                
+                local startTime = tick()
+                while (humanoidRootPart.Position - waypoint.Position).Magnitude > 6 do
+                    if tick() - startTime > 8 then
+                        -- If stuck, try to jump
+                        humanoid.Jump = true
+                        task.wait(0.5)
+                        if tick() - startTime > 12 then
+                            return false
+                        end
+                    end
+                    task.wait(0.1)
+                end
+                
+                -- If this is an action waypoint (jump), make the character jump
+                if waypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                    task.wait(0.5)
+                end
+            end
         end
-        task.wait(0.1)
+        
+        -- Final move to exact target position
+        humanoid:MoveTo(targetPos)
+        local finalStartTime = tick()
+        while (humanoidRootPart.Position - targetPos).Magnitude > 10 do
+            if tick() - finalStartTime > 10 then
+                return false
+            end
+            task.wait(0.1)
+        end
+        
+        return true
+    else
+        -- Fallback to simple movement if pathfinding fails
+        humanoid:MoveTo(targetPos)
+        local startTime = tick()
+        while (humanoidRootPart.Position - targetPos).Magnitude > 10 do
+            if tick() - startTime > 20 then
+                return false
+            end
+            -- Try jumping if stuck
+            if tick() - startTime > 5 and (humanoidRootPart.Position - targetPos).Magnitude < 15 then
+                humanoid.Jump = true
+            end
+            task.wait(0.1)
+        end
+        return true
     end
-    
-    return true
 end
 
 -- Main Movement Function
@@ -757,7 +815,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 
 local Window = Library:CreateWindow({
     Title = "Lavender Hub",
-    Footer = "v0.3(DAVI IS A FEMBOY)",
+    Footer = "v0.3 (DAVI IS A FEMBOY)",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -904,7 +962,7 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.3(DAVI IS A FEMBOY)", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Fixed Tween Ready", DoesWrap = true })
 
 -- Debug Tab
 local DebugTab = Window:AddTab("Debug", "bug")
