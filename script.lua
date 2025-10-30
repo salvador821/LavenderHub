@@ -53,7 +53,6 @@ local toggles = {
     autoFarm = false,
     autoDig = false,
     autoEquip = false,
-    farmFires = false,
     antiLag = false,
     tweenSpeed = 70,
     walkspeedEnabled = false,
@@ -76,29 +75,13 @@ local toggles = {
     isMoving = false,
     currentTarget = nil,
     
-    -- Fire farming
-    isFarmingFires = false,
-    lastFireCheckTime = 0,
-    fireCheckInterval = 1.7,
-    
     -- Debug info
     objectsDeleted = 0,
     performanceStats = {
         fps = 0,
         memory = 0,
         ping = 0
-    },
-    
-    -- Toys
-    autoToys = false,
-    autoMountainBooster = false,
-    autoBlueBooster = false,
-    autoRedBooster = false,
-    autoWealthClock = false,
-    lastMountainBoosterTime = 0,
-    lastBlueBoosterTime = 0,
-    lastRedBoosterTime = 0,
-    lastWealthClockTime = 0
+    }
 }
 
 local player = Players.LocalPlayer
@@ -130,104 +113,62 @@ local function addToConsole(message)
     end
 end
 
--- Fire Farming System
-local fireCache = {}
-local lastCacheUpdate = 0
-local CACHE_UPDATE_INTERVAL = 2
-
-local function updateFireCache()
-    fireCache = {}
-    
-    local searchLocations = {
-        workspace,
-        workspace:FindFirstChild("Fires"),
-        workspace:FindFirstChild("Fire"),
-        workspace:FindFirstChild("Effects"),
-        workspace:FindFirstChild("Debris")
+-- Auto-Save Functions
+local function saveSettings()
+    local settingsToSave = {
+        field = toggles.field,
+        movementMethod = toggles.movementMethod,
+        autoFarm = toggles.autoFarm,
+        autoDig = toggles.autoDig,
+        autoEquip = toggles.autoEquip,
+        antiLag = toggles.antiLag,
+        tweenSpeed = toggles.tweenSpeed,
+        walkspeedEnabled = toggles.walkspeedEnabled,
+        walkspeed = toggles.walkspeed
     }
     
-    for _, location in pairs(searchLocations) do
-        if location then
-            for _, obj in pairs(location:GetDescendants()) do
-                if obj:IsA("BasePart") and (obj.Name == "Fire" or obj.Name == "Fires") then
-                    if not (string.find(obj.Name:lower(), "mask") or string.find(obj.Name:lower(), "bee")) then
-                        local parent = obj.Parent
-                        local shouldSkip = false
-                        
-                        while parent and parent ~= workspace do
-                            if string.find(parent.Name:lower(), "mask") or string.find(parent.Name:lower(), "bee") then
-                                shouldSkip = true
-                                break
-                            end
-                            parent = parent.Parent
-                        end
-                        
-                        if not shouldSkip then
-                            table.insert(fireCache, obj)
-                        end
-                    end
-                end
-            end
+    local success, encoded = pcall(function()
+        return HttpService:JSONEncode(settingsToSave)
+    end)
+    
+    if success then
+        local writeSuccess, writeError = pcall(function()
+            writefile("LavenderHub_Settings.txt", encoded)
+        end)
+        if writeSuccess then
+            addToConsole("Settings saved")
         end
     end
-    
-    lastCacheUpdate = tick()
 end
 
-local function getNearestFire()
-    if tick() - lastCacheUpdate > CACHE_UPDATE_INTERVAL then
-        updateFireCache()
-    end
-    
-    local character = player.Character
-    if not character then return nil, math.huge end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, math.huge end
-    
-    local closestFire = nil
-    local shortestDistance = math.huge
-    
-    for _, fire in pairs(fireCache) do
-        if fire and fire.Parent then
-            local distance = (fire.Position - hrp.Position).Magnitude
-            if distance < shortestDistance then
-                shortestDistance = distance
-                closestFire = fire
-            end
+local function loadSettings()
+    local fileSuccess, content = pcall(function()
+        if isfile and isfile("LavenderHub_Settings.txt") then
+            return readfile("LavenderHub_Settings.txt")
         end
-    end
+        return nil
+    end)
     
-    return closestFire, shortestDistance
-end
-
-local function farmFires()
-    if not toggles.farmFires or not toggles.atField or toggles.isConverting then return false end
-    
-    local fire, dist = getNearestFire()
-    if fire and dist <= 30 then
-        toggles.isFarmingFires = true
-        addToConsole("🔥 Moving to fire (Distance: " .. math.floor(dist) .. ")")
+    if fileSuccess and content then
+        local decodeSuccess, decoded = pcall(function()
+            return HttpService:JSONDecode(content)
+        end)
         
-        local character = player.Character
-        if character then
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                humanoid:MoveTo(fire.Position)
-                
-                local startTime = tick()
-                while tick() - startTime < 1.7 and (character.HumanoidRootPart.Position - fire.Position).Magnitude > 4 do
-                    if not fire.Parent then break end
-                    task.wait(0.1)
-                end
-                
-                toggles.isFarmingFires = false
-                return true
-            end
+        if decodeSuccess and decoded then
+            toggles.field = decoded.field or toggles.field
+            toggles.movementMethod = decoded.movementMethod or toggles.movementMethod
+            toggles.autoFarm = decoded.autoFarm or toggles.autoFarm
+            toggles.autoDig = decoded.autoDig or toggles.autoDig
+            toggles.autoEquip = decoded.autoEquip or toggles.autoEquip
+            toggles.antiLag = decoded.antiLag or toggles.antiLag
+            toggles.tweenSpeed = decoded.tweenSpeed or toggles.tweenSpeed
+            toggles.walkspeedEnabled = decoded.walkspeedEnabled or toggles.walkspeedEnabled
+            toggles.walkspeed = decoded.walkspeed or toggles.walkspeed
+            addToConsole("Settings loaded")
+            return true
         end
     end
-    
-    toggles.isFarmingFires = false
+    addToConsole("No saved settings")
     return false
 end
 
@@ -387,70 +328,6 @@ local function checkHiveOwnership()
         toggles.lastHiveCheckTime = tick()
     end
 end
--- Auto Toys System
-local function useMountainBooster()
-    if not toggles.autoToys or not toggles.autoMountainBooster then return end
-    
-    local currentTime = tick()
-    if currentTime - toggles.lastMountainBoosterTime >= 1800 then
-        local args = {
-            "Mountain Booster",
-            25
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
-        toggles.lastMountainBoosterTime = currentTime
-    end
-end
-
-local function useBlueBooster()
-    if not toggles.autoToys or not toggles.autoBlueBooster then return end
-    
-    local currentTime = tick()
-    if currentTime - toggles.lastBlueBoosterTime >= 1800 then
-        local args = {
-            "Blue Booster",
-            15
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
-        toggles.lastBlueBoosterTime = currentTime
-    end
-end
-
-local function useRedBooster()
-    if not toggles.autoToys or not toggles.autoRedBooster then return end
-    
-    local currentTime = tick()
-    if currentTime - toggles.lastRedBoosterTime >= 1800 then
-        local args = {
-            "Red Booster",
-            0
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
-        toggles.lastRedBoosterTime = currentTime
-    end
-end
-
-local function useWealthClock()
-    if not toggles.autoToys or not toggles.autoWealthClock then return end
-    
-    local currentTime = tick()
-    if currentTime - toggles.lastWealthClockTime >= 3600 then
-        local args = {
-            "Ticket Dispenser",
-            0
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
-        toggles.lastWealthClockTime = currentTime
-    end
-end
-
-local function updateAutoToys()
-    useMountainBooster()
-    useBlueBooster()
-    useRedBooster()
-    useWealthClock()
-end
-
 -- FIXED SMOOTH TWEEN MOVEMENT SYSTEM
 local function smoothTweenToPosition(targetPos)
     local character = GetCharacter()
@@ -897,28 +774,12 @@ local function updateFarmState()
             addToConsole("Converting to honey")
             startConverting()
         else
-            -- Priority order: Fires > Tokens > Continuous Movement
-            if toggles.farmFires and not toggles.isFarmingFires then
-                if farmFires() then
-                    -- If we farmed a fire, wait a bit before continuing
-                    task.wait(0.5)
-                else
-                    -- If no fires, collect tokens
-                    collectTokens()
-                    
-                    -- Continuous movement when not collecting tokens or fires
-                    if not toggles.isMoving and not areTokensNearby() then
-                        performContinuousMovement()
-                    end
-                end
-            else
-                -- Collect tokens if farm fires is disabled
-                collectTokens()
-                
-                -- Continuous movement when not collecting tokens
-                if not toggles.isMoving and not areTokensNearby() then
-                    performContinuousMovement()
-                end
+            -- Always try to collect tokens first
+            collectTokens()
+            
+            -- Continuous movement when not collecting tokens
+            if not toggles.isMoving and not areTokensNearby() then
+                performContinuousMovement()
             end
         end
         
@@ -953,8 +814,8 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub - SMOOTH",
-    Footer = "v1.0 - Fixed Tween",
+    Title = "Lavender Hub",
+    Footer = "v0.3 (davi is not a femboy)",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -980,6 +841,7 @@ local FieldDropdown = FarmingGroupbox:AddDropdown("FieldDropdown", {
     Text = "Field",
     Callback = function(Value)
         toggles.field = Value
+        saveSettings()
     end
 })
 
@@ -988,6 +850,7 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
     Default = false,
     Callback = function(Value)
         toggles.autoFarm = Value
+        saveSettings()
         if Value then
             startFarming()
         else
@@ -1000,41 +863,26 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
     end
 })
 
--- Farm Settings Groupbox
-local FarmSettingsGroupbox = FarmingGroupbox:AddGroupbox("Farm Settings")
-
-local AutoDigToggle = FarmSettingsGroupbox:AddToggle("AutoDigToggle", {
+local AutoDigToggle = FarmingGroupbox:AddToggle("AutoDigToggle", {
     Text = "Auto Dig",
     Default = false,
     Callback = function(Value)
         toggles.autoDig = Value
+        saveSettings()
     end
 })
 
-local AutoEquipToggle = FarmSettingsGroupbox:AddToggle("AutoEquipToggle", {
+local AutoEquipToggle = FarmingGroupbox:AddToggle("AutoEquipToggle", {
     Text = "Auto Equip Tools",
     Default = false,
     Callback = function(Value)
         toggles.autoEquip = Value
+        saveSettings()
         if Value then
             addToConsole("Auto Equip Tools enabled")
             equipAllTools()
         else
             addToConsole("Auto Equip Tools disabled")
-        end
-    end
-})
-
-local FarmFiresToggle = FarmSettingsGroupbox:AddToggle("FarmFiresToggle", {
-    Text = "Farm Fires",
-    Default = false,
-    Callback = function(Value)
-        toggles.farmFires = Value
-        if Value then
-            addToConsole("🔥 Farm Fires enabled")
-            updateFireCache()
-        else
-            addToConsole("🔥 Farm Fires disabled")
         end
     end
 })
@@ -1048,6 +896,7 @@ local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
     Text = "Method",
     Callback = function(Value)
         toggles.movementMethod = Value
+        saveSettings()
     end
 })
 
@@ -1060,6 +909,7 @@ local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
     Compact = true,
     Callback = function(Value)
         toggles.tweenSpeed = Value
+        saveSettings()
     end
 })
 
@@ -1070,6 +920,7 @@ local WalkspeedToggle = PlayerGroupbox:AddToggle("WalkspeedToggle", {
     Default = false,
     Callback = function(Value)
         toggles.walkspeedEnabled = Value
+        saveSettings()
         if not Value and player.Character then
             local humanoid = player.Character:FindFirstChild("Humanoid")
             if humanoid then humanoid.WalkSpeed = 16 end
@@ -1086,6 +937,7 @@ local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
     Compact = true,
     Callback = function(Value)
         toggles.walkspeed = Value
+        saveSettings()
     end
 })
 
@@ -1097,55 +949,13 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
     Tooltip = "Delete fruits and nature objects to reduce lag",
     Callback = function(Value)
         toggles.antiLag = Value
+        saveSettings()
         if Value then
             addToConsole("Anti-Lag enabled - cleaning objects...")
             runAntiLag()
         else
             addToConsole("Anti-Lag disabled")
         end
-    end
-})
--- Toys Tab
-local ToysTab = Window:AddTab("Toys", "gamepad")
-local ToysGroupbox = ToysTab:AddLeftGroupbox("Auto Toys")
-
-local AutoToysToggle = ToysGroupbox:AddToggle("AutoToysToggle", {
-    Text = "Auto Toys (Master Switch)",
-    Default = false,
-    Callback = function(Value)
-        toggles.autoToys = Value
-    end
-})
-
-local MountainBoosterToggle = ToysGroupbox:AddToggle("MountainBoosterToggle", {
-    Text = "Auto Mountain Booster (30 mins)",
-    Default = false,
-    Callback = function(Value)
-        toggles.autoMountainBooster = Value
-    end
-})
-
-local BlueBoosterToggle = ToysGroupbox:AddToggle("BlueBoosterToggle", {
-    Text = "Auto Blue Booster (30 mins)",
-    Default = false,
-    Callback = function(Value)
-        toggles.autoBlueBooster = Value
-    end
-})
-
-local RedBoosterToggle = ToysGroupbox:AddToggle("RedBoosterToggle", {
-    Text = "Auto Red Booster (30 mins)",
-    Default = false,
-    Callback = function(Value)
-        toggles.autoRedBooster = Value
-    end
-})
-
-local WealthClockToggle = ToysGroupbox:AddToggle("WealthClockToggle", {
-    Text = "Auto Wealth Clock (60 mins)",
-    Default = false,
-    Callback = function(Value)
-        toggles.autoWealthClock = Value
     end
 })
 
@@ -1186,11 +996,6 @@ DebugActionsGroupbox:AddButton("Equip Tools", function()
     addToConsole("Manually equipped all tools")
 end)
 
-DebugActionsGroupbox:AddButton("Update Fire Cache", function()
-    updateFireCache()
-    addToConsole("🔥 Fire cache updated")
-end)
-
 -- Status Groupbox
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
 local StatusLabel = StatusGroupbox:AddLabel("Status: Idle")
@@ -1224,7 +1029,6 @@ RunService.Heartbeat:Connect(function()
     clearVisitedTokens()
     updatePerformanceStats()
     autoEquipTools() -- Added auto equip tools here
-    updateAutoToys() -- Added auto toys here
     
     -- Update status display
     local statusText = "Idle"
@@ -1232,11 +1036,7 @@ RunService.Heartbeat:Connect(function()
     
     if toggles.autoFarm then
         if toggles.isFarming and toggles.atField then
-            if toggles.isFarmingFires then
-                statusText = "Farming Fires"
-            else
-                statusText = "Farming"
-            end
+            statusText = "Farming"
         elseif toggles.isConverting and toggles.atHive then
             statusText = "Converting"
         elseif toggles.isFarming then
@@ -1256,35 +1056,31 @@ spawn(function()
         local currentPollen = getCurrentPollen()
         
         WrappedLabel:SetText(string.format(
-            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nFires: %s\nAnti-Lag: %s",
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nAnti-Lag: %s",
             formatNumber(currentPollen),
             toggles.field,
             displayHiveName,
             toggles.movementMethod,
             toggles.autoDig and "ON" or "OFF",
             toggles.autoEquip and "ON" or "OFF",
-            toggles.farmFires and "ON" or "OFF",
             toggles.antiLag and "ON" or "OFF"
         ))
     end
 end)
+
+-- Load settings on startup
+loadSettings()
 
 -- Apply loaded settings to GUI
 FieldDropdown:Set(toggles.field)
 AutoFarmToggle:Set(toggles.autoFarm)
 AutoDigToggle:Set(toggles.autoDig)
 AutoEquipToggle:Set(toggles.autoEquip)
-FarmFiresToggle:Set(toggles.farmFires)
 AntiLagToggle:Set(toggles.antiLag)
 MovementMethodDropdown:Set(toggles.movementMethod)
 TweenSpeedSlider:Set(toggles.tweenSpeed)
 WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
-AutoToysToggle:Set(toggles.autoToys)
-MountainBoosterToggle:Set(toggles.autoMountainBooster)
-BlueBoosterToggle:Set(toggles.autoBlueBooster)
-RedBoosterToggle:Set(toggles.autoRedBooster)
-WealthClockToggle:Set(toggles.autoWealthClock)
 
 -- AUTO CLAIM ALL HIVES ON STARTUP
 addToConsole("🚀 Lavender Hub v1.0 - Fixed Tween Starting...")
@@ -1302,9 +1098,6 @@ if toggles.antiLag then
     addToConsole("Running startup Anti-Lag...")
     runAntiLag()
 end
-
--- Initial fire cache update
-updateFireCache()
 
 addToConsole("✅ Smooth Tween System Ready!")
 addToConsole("🎯 Auto Farm System Ready!")
