@@ -987,87 +987,120 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
     Default = false,
     Callback = function(Value)
         toggles.autoFarm = Value
-        if Value and not toggles.isFarming and not toggles.isConverting then
+        if Value then
             startFarming()
+        else
+            toggles.isFarming = false
+            toggles.isConverting = false
+            toggles.atField = false
+            toggles.atHive = false
+            toggles.isMoving = false
         end
     end
 })
 
-local AutoDigToggle = FarmingGroupbox:AddToggle("AutoDigToggle", {
+-- Farm Settings Groupbox
+local FarmSettingsGroupbox = FarmingGroupbox:AddGroupbox("Farm Settings")
+
+local AutoDigToggle = FarmSettingsGroupbox:AddToggle("AutoDigToggle", {
     Text = "Auto Dig",
     Default = false,
     Callback = function(Value)
         toggles.autoDig = Value
-        if Value and toggles.autoFarm and toggles.atField then
-            spawn(DigLoop)
-        end
     end
 })
 
-local AutoEquipToggle = FarmingGroupbox:AddToggle("AutoEquipToggle", {
+local AutoEquipToggle = FarmSettingsGroupbox:AddToggle("AutoEquipToggle", {
     Text = "Auto Equip Tools",
     Default = false,
     Callback = function(Value)
         toggles.autoEquip = Value
         if Value then
+            addToConsole("Auto Equip Tools enabled")
             equipAllTools()
+        else
+            addToConsole("Auto Equip Tools disabled")
         end
     end
 })
 
-local FarmFiresToggle = FarmingGroupbox:AddToggle("FarmFiresToggle", {
+local FarmFiresToggle = FarmSettingsGroupbox:AddToggle("FarmFiresToggle", {
     Text = "Farm Fires",
     Default = false,
     Callback = function(Value)
         toggles.farmFires = Value
+        if Value then
+            addToConsole("🔥 Farm Fires enabled")
+            updateFireCache()
+        else
+            addToConsole("🔥 Farm Fires disabled")
+        end
     end
 })
 
 -- Movement Settings
 local MovementGroupbox = MainTab:AddRightGroupbox("Movement")
-local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethodDropdown", {
-    Values = {"Tween", "Walk"},
+local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
+    Values = {"Walk", "Tween"},
     Default = 1,
     Multi = false,
-    Text = "Movement Method",
+    Text = "Method",
     Callback = function(Value)
         toggles.movementMethod = Value
     end
 })
 
-local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeedSlider", {
+local TweenSpeedSlider = MovementGroupbox:AddSlider("TweenSpeed", {
     Text = "Tween Speed",
     Default = 70,
-    Min = 20,
-    Max = 200,
+    Min = 30,
+    Max = 150,
     Rounding = 1,
+    Compact = true,
     Callback = function(Value)
         toggles.tweenSpeed = Value
     end
 })
 
-local WalkspeedToggle = MovementGroupbox:AddToggle("WalkspeedToggle", {
-    Text = "Enable Walkspeed",
+-- Player Settings
+local PlayerGroupbox = MainTab:AddLeftGroupbox("Player")
+local WalkspeedToggle = PlayerGroupbox:AddToggle("WalkspeedToggle", {
+    Text = "Walkspeed",
     Default = false,
     Callback = function(Value)
         toggles.walkspeedEnabled = Value
-        if not Value then
-            local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+        if not Value and player.Character then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
             if humanoid then humanoid.WalkSpeed = 16 end
         end
     end
 })
 
-local WalkspeedSlider = MovementGroupbox:AddSlider("WalkspeedSlider", {
-    Text = "Walkspeed",
+local WalkspeedSlider = PlayerGroupbox:AddSlider("WalkspeedSlider", {
+    Text = "Speed",
     Default = 50,
     Min = 16,
-    Max = 200,
+    Max = 100,
     Rounding = 1,
+    Compact = true,
     Callback = function(Value)
         toggles.walkspeed = Value
-        if toggles.walkspeedEnabled then
-            updateWalkspeed()
+    end
+})
+
+-- Anti-Lag Settings
+local AntiLagGroupbox = MainTab:AddRightGroupbox("Performance")
+local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
+    Text = "Anti Lag",
+    Default = false,
+    Tooltip = "Delete fruits and nature objects to reduce lag",
+    Callback = function(Value)
+        toggles.antiLag = Value
+        if Value then
+            addToConsole("Anti-Lag enabled - cleaning objects...")
+            runAntiLag()
+        else
+            addToConsole("Anti-Lag disabled")
         end
     end
 })
@@ -1116,91 +1149,167 @@ local WealthClockToggle = ToysGroupbox:AddToggle("WealthClockToggle", {
     end
 })
 
--- Misc Tab
-local MiscTab = Window:AddTab("Misc", "settings")
-local MiscGroupbox = MiscTab:AddLeftGroupbox("Miscellaneous")
+-- Console Tab
+local ConsoleTab = Window:AddTab("Console", "terminal")
+local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Fixed Tween Ready", DoesWrap = true })
 
-local AntiLagToggle = MiscGroupbox:AddToggle("AntiLagToggle", {
-    Text = "Anti-Lag",
-    Default = false,
-    Callback = function(Value)
-        toggles.antiLag = Value
-        if Value then
-            runAntiLag()
-        end
+-- Debug Tab
+local DebugTab = Window:AddTab("Debug", "bug")
+local DebugGroupbox = DebugTab:AddLeftGroupbox("Performance Stats")
+debugLabels.fps = DebugGroupbox:AddLabel("FPS: 0")
+debugLabels.memory = DebugGroupbox:AddLabel("Memory: 0 MB")
+debugLabels.objects = DebugGroupbox:AddLabel("Objects Deleted: 0")
+
+local DebugActionsGroupbox = DebugTab:AddRightGroupbox("Actions")
+DebugActionsGroupbox:AddButton("Run Anti-Lag", function()
+    if toggles.antiLag then
+        runAntiLag()
+    else
+        addToConsole("Enable Anti-Lag first")
     end
-})
+end)
 
-local AutoClaimHiveButton = MiscGroupbox:AddButton("Auto Claim Hive", function()
+DebugActionsGroupbox:AddButton("Clear Console", function()
+    consoleLogs = {}
+    if consoleLabel then
+        consoleLabel:SetText("Console cleared")
+    end
+end)
+
+DebugActionsGroupbox:AddButton("Claim Hive", function()
     autoClaimHive()
 end)
 
--- Console Tab
-local ConsoleTab = Window:AddTab("Console", "terminal")
-local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Console")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Console initialized...", DoesWrap = true })
-
--- Initialize
-Library:SetWatermark("Lavender Hub - SMOOTH TWEEN FIXED")
-Library:SetWatermarkVisibility(true)
-
-Library:OnUnload(function()
-    addToConsole("Unloading...")
+DebugActionsGroupbox:AddButton("Equip Tools", function()
+    equipAllTools()
+    addToConsole("Manually equipped all tools")
 end)
 
--- Main Game Loop
-spawn(function()
-    while true do
-        SafeCall(function()
-            -- Update farm state
-            updateFarmState()
-            
-            -- Update walkspeed
-            updateWalkspeed()
-            
-            -- Clear visited tokens periodically
-            clearVisitedTokens()
-            
-            -- Update auto toys
-            updateAutoToys()
-            
-            -- Update performance stats
-            updatePerformanceStats()
-            
-            -- Update auto equip
-            autoEquipTools()
-            
-            -- Update stats display
-            local currentPollen = getCurrentPollen()
-            local hiveText = displayHiveName
-            local statusText = "Idle"
-            
-            if toggles.isFarming then
+DebugActionsGroupbox:AddButton("Update Fire Cache", function()
+    updateFireCache()
+    addToConsole("🔥 Fire cache updated")
+end)
+
+-- Status Groupbox
+local StatusGroupbox = MainTab:AddRightGroupbox("Status")
+local StatusLabel = StatusGroupbox:AddLabel("Status: Idle")
+local PollenLabel = StatusGroupbox:AddLabel("Pollen: 0")
+
+-- UI Settings Tab
+local UISettingsTab = Window:AddTab("UI Settings", "settings")
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+SaveManager:BuildConfigSection(UISettingsTab)
+ThemeManager:ApplyToTab(UISettingsTab)
+SaveManager:LoadAutoloadConfig()
+
+-- Anti-AFK
+player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+end)
+
+-- Optimized Main Loops
+local lastHeartbeatTime = 0
+RunService.Heartbeat:Connect(function()
+    local currentTime = tick()
+    if currentTime - lastHeartbeatTime < 0.1 then return end
+    lastHeartbeatTime = currentTime
+    
+    updateFarmState()
+    updateWalkspeed()
+    clearVisitedTokens()
+    updatePerformanceStats()
+    autoEquipTools() -- Added auto equip tools here
+    updateAutoToys() -- Added auto toys here
+    
+    -- Update status display
+    local statusText = "Idle"
+    local currentPollen = getCurrentPollen()
+    
+    if toggles.autoFarm then
+        if toggles.isFarming and toggles.atField then
+            if toggles.isFarmingFires then
+                statusText = "Farming Fires"
+            else
                 statusText = "Farming"
-            elseif toggles.isConverting then
-                statusText = "Converting"
             end
-            
-            WrappedLabel:SetText(string.format(
-                "Status: %s\nPollen: %s\nHive: %s\nFPS: %d\nMemory: %d MB\nObjects Deleted: %d",
-                statusText,
-                formatNumber(currentPollen),
-                hiveText,
-                toggles.performanceStats.fps,
-                toggles.performanceStats.memory,
-                toggles.objectsDeleted
-            ))
-        end, "MainLoop")
-        task.wait(0.1)
+        elseif toggles.isConverting and toggles.atHive then
+            statusText = "Converting"
+        elseif toggles.isFarming then
+            statusText = "Moving to Field"
+        elseif toggles.isConverting then
+            statusText = "Moving to Hive"
+        end
+    end
+    
+    StatusLabel:SetText("Status: " .. statusText)
+    PollenLabel:SetText("Pollen: " .. formatNumber(currentPollen))
+end)
+
+-- Stats Update Loop
+spawn(function()
+    while task.wait(1) do
+        local currentPollen = getCurrentPollen()
+        
+        WrappedLabel:SetText(string.format(
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nFires: %s\nAnti-Lag: %s",
+            formatNumber(currentPollen),
+            toggles.field,
+            displayHiveName,
+            toggles.movementMethod,
+            toggles.autoDig and "ON" or "OFF",
+            toggles.autoEquip and "ON" or "OFF",
+            toggles.farmFires and "ON" or "OFF",
+            toggles.antiLag and "ON" or "OFF"
+        ))
     end
 end)
 
--- Anti-AFK
-local VirtualInputManager = game:GetService("VirtualInputManager")
-player.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
+-- Apply loaded settings to GUI
+FieldDropdown:Set(toggles.field)
+AutoFarmToggle:Set(toggles.autoFarm)
+AutoDigToggle:Set(toggles.autoDig)
+AutoEquipToggle:Set(toggles.autoEquip)
+FarmFiresToggle:Set(toggles.farmFires)
+AntiLagToggle:Set(toggles.antiLag)
+MovementMethodDropdown:Set(toggles.movementMethod)
+TweenSpeedSlider:Set(toggles.tweenSpeed)
+WalkspeedToggle:Set(toggles.walkspeedEnabled)
+WalkspeedSlider:Set(toggles.walkspeed)
+AutoToysToggle:Set(toggles.autoToys)
+MountainBoosterToggle:Set(toggles.autoMountainBooster)
+BlueBoosterToggle:Set(toggles.autoBlueBooster)
+RedBoosterToggle:Set(toggles.autoRedBooster)
+WealthClockToggle:Set(toggles.autoWealthClock)
 
-addToConsole("Lavender Hub - SMOOTH TWEEN FIXED loaded!")
-addToConsole("Use RightControl to toggle GUI")
+-- AUTO CLAIM ALL HIVES ON STARTUP
+addToConsole("🚀 Lavender Hub v1.0 - Fixed Tween Starting...")
+addToConsole("🔄 Auto-claiming hives...")
+autoClaimHive()
+
+task.wait(3)
+
+-- Update owned hive after claiming
+ownedHive = getOwnedHive()
+displayHiveName = ownedHive and "Hive" or "None"
+
+-- Run anti-lag on startup if enabled
+if toggles.antiLag then
+    addToConsole("Running startup Anti-Lag...")
+    runAntiLag()
+end
+
+-- Initial fire cache update
+updateFireCache()
+
+addToConsole("✅ Smooth Tween System Ready!")
+addToConsole("🎯 Auto Farm System Ready!")
+if ownedHive then
+    addToConsole("🏠 Owned Hive: " .. ownedHive)
+else
+    addToConsole("💔 No hive owned")
+end
