@@ -1203,4 +1203,4 @@ player.Idled:Connect(function()
 end)
 
 addToConsole("Lavender Hub - SMOOTH TWEEN FIXED loaded!")
-addToConsole("Use RightControl to toggle GUI"
+addToConsole("Use RightControl to toggle GUI")
