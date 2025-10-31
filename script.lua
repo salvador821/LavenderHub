@@ -656,13 +656,11 @@ local function DigLoop()
     digRunning = false
 end
 
--- Fire Collection System - OPTIMIZED WITH HEARTBEAT
+-- Fire Collection System - SIMPLE LIKE TOKENS
 local farmFires = false
 local fireCache = {}
 local lastFireCacheUpdate = 0
 local FIRE_CACHE_UPDATE_INTERVAL = 2
-local lastFireTime = 0
-local fireUpdateCooldown = 0
 local isCollectingFire = false
 
 local function updateFireCache()
@@ -707,7 +705,6 @@ end
 local function getNearestFire()
     local currentTime = tick()
     
-    -- Update cache every 2 seconds using heartbeat timing
     if currentTime - lastFireCacheUpdate > FIRE_CACHE_UPDATE_INTERVAL then
         updateFireCache()
     end
@@ -736,30 +733,23 @@ end
 local function collectFires()
     if not toggles.autoFarm or toggles.isConverting or not toggles.atField or not farmFires or isCollectingFire then return end
     
-    local currentTime = tick()
-    if currentTime - fireUpdateCooldown < 0.1 then return end -- Cooldown to prevent spam
-    fireUpdateCooldown = currentTime
-    
     local fire, dist = getNearestFire()
-    if fire and dist <= 30 and tick() - lastFireTime > 1.5 then
+    if fire and dist <= 30 then
         isCollectingFire = true
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(fire.Position)
-            lastFireTime = tick()
-            
-            -- Wait for movement to complete or timeout
             local startTime = tick()
             while (player.Character.HumanoidRootPart.Position - fire.Position).Magnitude > 4 and tick() - startTime < 3 do
                 if not fire.Parent then break end
-                RunService.Heartbeat:Wait()
+                task.wait()
             end
         end
         isCollectingFire = false
     end
 end
 
--- Token Collection - IMPROVED
+-- Token Collection
 local isCollectingToken = false
 
 local function getNearestToken()
@@ -794,7 +784,7 @@ local function collectTokens()
             local startTime = tick()
             while (player.Character.HumanoidRootPart.Position - token.Position).Magnitude > 4 and tick() - startTime < 3 do
                 if not token.Parent then break end
-                RunService.Heartbeat:Wait()
+                task.wait()
             end
             if token.Parent then
                 toggles.visitedTokens[token] = true
@@ -932,7 +922,7 @@ local function updateFarmState()
             startConverting()
         else
             -- Priority: Fires > Tokens > Movement
-            if farmFires and areFiresNearby() and tick() - lastFireTime > 1.5 then
+            if farmFires and areFiresNearby() then
                 collectFires()
             elseif areTokensNearby() then
                 collectTokens()
