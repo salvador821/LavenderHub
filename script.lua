@@ -656,99 +656,6 @@ local function DigLoop()
     digRunning = false
 end
 
--- Fire Collection System - SIMPLE LIKE TOKENS
-local farmFires = false
-local fireCache = {}
-local lastFireCacheUpdate = 0
-local FIRE_CACHE_UPDATE_INTERVAL = 2
-local isCollectingFire = false
-
-local function updateFireCache()
-    fireCache = {}
-    
-    local searchLocations = {
-        workspace,
-        workspace:FindFirstChild("Fires"),
-        workspace:FindFirstChild("Fire"),
-        workspace:FindFirstChild("Effects"),
-        workspace:FindFirstChild("Debris")
-    }
-    
-    for _, location in pairs(searchLocations) do
-        if location then
-            for _, obj in pairs(location:GetDescendants()) do
-                if obj:IsA("BasePart") and (obj.Name == "Fire" or obj.Name == "Fires") then
-                    if not (string.find(obj.Name:lower(), "mask") or string.find(obj.Name:lower(), "bee")) then
-                        local parent = obj.Parent
-                        local shouldSkip = false
-                        
-                        while parent and parent ~= workspace do
-                            if string.find(parent.Name:lower(), "mask") or string.find(parent.Name:lower(), "bee") then
-                                shouldSkip = true
-                                break
-                            end
-                            parent = parent.Parent
-                        end
-                        
-                        if not shouldSkip then
-                            table.insert(fireCache, obj)
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    lastFireCacheUpdate = tick()
-end
-
-local function getNearestFire()
-    local currentTime = tick()
-    
-    if currentTime - lastFireCacheUpdate > FIRE_CACHE_UPDATE_INTERVAL then
-        updateFireCache()
-    end
-    
-    local closestFire = nil
-    local shortestDistance = math.huge
-    
-    for _, fire in pairs(fireCache) do
-        if fire and fire.Parent then
-            local distance = (fire.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            if distance < shortestDistance and distance <= 30 then
-                shortestDistance = distance
-                closestFire = fire
-            end
-        end
-    end
-    
-    return closestFire, shortestDistance
-end
-
-local function areFiresNearby()
-    local fire = getNearestFire()
-    return fire ~= nil
-end
-
-local function collectFires()
-    if not toggles.autoFarm or toggles.isConverting or not toggles.atField or not farmFires or isCollectingFire then return end
-    
-    local fire, dist = getNearestFire()
-    if fire and dist <= 30 then
-        isCollectingFire = true
-        local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:MoveTo(fire.Position)
-            local startTime = tick()
-            while (player.Character.HumanoidRootPart.Position - fire.Position).Magnitude > 4 and tick() - startTime < 3 do
-                if not fire.Parent then break end
-                task.wait()
-            end
-        end
-        isCollectingFire = false
-    end
-end
-
 -- Token Collection
 local isCollectingToken = false
 
@@ -921,12 +828,10 @@ local function updateFarmState()
             addToConsole("Converting to honey")
             startConverting()
         else
-            -- Priority: Fires > Tokens > Movement
-            if farmFires and areFiresNearby() then
-                collectFires()
-            elseif areTokensNearby() then
+            -- Priority: Tokens > Movement
+            if areTokensNearby() then
                 collectTokens()
-            elseif not toggles.isMoving and not areTokensNearby() and (not farmFires or not areFiresNearby()) then
+            elseif not toggles.isMoving and not areTokensNearby() then
                 performContinuousMovement()
             end
         end
@@ -1075,16 +980,6 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
             toggles.atHive = false
             toggles.isMoving = false
         end
-    end
-})
-
-local FarmSettingsDropdown = FarmingGroupbox:AddDropdown("FarmSettings", {
-    Values = {"Farm Fires"},
-    Default = 1,
-    Multi = false,
-    Text = "Farm Settings",
-    Callback = function(Value)
-        farmFires = (Value == "Farm Fires")
     end
 })
 
