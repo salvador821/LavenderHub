@@ -606,6 +606,96 @@ local function DigLoop()
     digRunning = false
 end
 
+-- Fire Collection System
+local farmFires = false
+local fireCache = {}
+local lastFireCacheUpdate = 0
+local FIRE_CACHE_UPDATE_INTERVAL = 2
+local lastFireTime = 0
+
+local function updateFireCache()
+    fireCache = {}
+    
+    local searchLocations = {
+        workspace,
+        workspace:FindFirstChild("Fires"),
+        workspace:FindFirstChild("Fire"),
+        workspace:FindFirstChild("Effects"),
+        workspace:FindFirstChild("Debris")
+    }
+    
+    for _, location in pairs(searchLocations) do
+        if location then
+            for _, obj in pairs(location:GetDescendants()) do
+                if obj:IsA("BasePart") and (obj.Name == "Fire" or obj.Name == "Fires") then
+                    if not (string.find(obj.Name:lower(), "mask") or string.find(obj.Name:lower(), "bee")) then
+                        local parent = obj.Parent
+                        local shouldSkip = false
+                        
+                        while parent and parent ~= workspace do
+                            if string.find(parent.Name:lower(), "mask") or string.find(parent.Name:lower(), "bee") then
+                                shouldSkip = true
+                                break
+                            end
+                            parent = parent.Parent
+                        end
+                        
+                        if not shouldSkip then
+                            table.insert(fireCache, obj)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    lastFireCacheUpdate = tick()
+end
+
+local function getNearestFire()
+    if tick() - lastFireCacheUpdate > FIRE_CACHE_UPDATE_INTERVAL then
+        updateFireCache()
+    end
+    
+    local closestFire = nil
+    local shortestDistance = math.huge
+    
+    for _, fire in pairs(fireCache) do
+        if fire and fire.Parent then
+            local distance = (fire.Position - player.Character.HumanoidRootPart.Position).Magnitude
+            if distance < shortestDistance then
+                shortestDistance = distance
+                closestFire = fire
+            end
+        end
+    end
+    
+    return closestFire, shortestDistance
+end
+
+local function areFiresNearby()
+    local fire = getNearestFire()
+    return fire ~= nil
+end
+
+local function collectFires()
+    if not toggles.autoFarm or toggles.isConverting or not toggles.atField or not farmFires then return end
+    
+    local fire, dist = getNearestFire()
+    if fire and dist <= 30 then
+        local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:MoveTo(fire.Position)
+            lastFireTime = tick()
+            local startTime = tick()
+            while (player.Character.HumanoidRootPart.Position - fire.Position).Magnitude > 4 and tick() - startTime < 3 do
+                if not fire.Parent then break end
+                task.wait()
+            end
+        end
+    end
+end
+
 -- Token Collection
 local function getNearestToken()
     local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
@@ -774,11 +864,12 @@ local function updateFarmState()
             addToConsole("Converting to honey")
             startConverting()
         else
-            -- Always try to collect tokens first
-            collectTokens()
-            
-            -- Continuous movement when not collecting tokens
-            if not toggles.isMoving and not areTokensNearby() then
+            -- Priority: Fires > Tokens > Movement
+            if farmFires and areFiresNearby() and tick() - lastFireTime > 1.5 then
+                collectFires()
+            elseif areTokensNearby() then
+                collectTokens()
+            elseif not toggles.isMoving and not areTokensNearby() and (not farmFires or not areFiresNearby()) then
                 performContinuousMovement()
             end
         end
@@ -808,8 +899,12 @@ local function clearVisitedTokens()
     end
 end
 
--- Auto Toys System
-local autoToysEnabled = false
+-- Toys System
+local mountainBoosterEnabled = false
+local blueBoosterEnabled = false
+local redBoosterEnabled = false
+local wealthClockEnabled = false
+
 local lastMountainBoosterTime = 0
 local lastBlueBoosterTime = 0
 local lastRedBoosterTime = 0
@@ -851,28 +946,22 @@ local function useWealthClock()
     lastWealthClockTime = tick()
 end
 
-local function updateAutoToys()
-    if not autoToysEnabled then return end
-    
+local function updateToys()
     local currentTime = tick()
     
-    -- Mountain Booster every 30 minutes
-    if currentTime - lastMountainBoosterTime >= 1800 then
+    if mountainBoosterEnabled and currentTime - lastMountainBoosterTime >= 1800 then
         useMountainBooster()
     end
     
-    -- Blue Booster every 30 minutes
-    if currentTime - lastBlueBoosterTime >= 1800 then
+    if blueBoosterEnabled and currentTime - lastBlueBoosterTime >= 1800 then
         useBlueBooster()
     end
     
-    -- Red Booster every 30 minutes
-    if currentTime - lastRedBoosterTime >= 1800 then
+    if redBoosterEnabled and currentTime - lastRedBoosterTime >= 1800 then
         useRedBooster()
     end
     
-    -- Wealth Clock every hour
-    if currentTime - lastWealthClockTime >= 3600 then
+    if wealthClockEnabled and currentTime - lastWealthClockTime >= 3600 then
         useWealthClock()
     end
 end
@@ -929,6 +1018,16 @@ local AutoFarmToggle = FarmingGroupbox:AddToggle("AutoFarmToggle", {
             toggles.atHive = false
             toggles.isMoving = false
         end
+    end
+})
+
+local FarmSettingsDropdown = FarmingGroupbox:AddDropdown("FarmSettings", {
+    Values = {"Farm Fires"},
+    Default = 1,
+    Multi = false,
+    Text = "Farm Settings",
+    Callback = function(Value)
+        farmFires = (Value == "Farm Fires")
     end
 })
 
@@ -1029,17 +1128,54 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
 
 -- Toys Tab
 local ToysTab = Window:AddTab("Toys", "gift")
-local ToysGroupbox = ToysTab:AddLeftGroupbox("Auto Toys")
 
-local AutoToysToggle = ToysGroupbox:AddToggle("AutoToysToggle", {
-    Text = "Auto Toys",
+-- Mountain Booster
+local MountainBoosterGroupbox = ToysTab:AddLeftGroupbox("Mountain Booster")
+local MountainBoosterToggle = MountainBoosterGroupbox:AddToggle("MountainBoosterToggle", {
+    Text = "Auto Mountain Booster",
     Default = false,
     Callback = function(Value)
-        autoToysEnabled = Value
+        mountainBoosterEnabled = Value
         if Value then
             useMountainBooster()
+        end
+    end
+})
+
+-- Blue Booster
+local BlueBoosterGroupbox = ToysTab:AddLeftGroupbox("Blue Booster")
+local BlueBoosterToggle = BlueBoosterGroupbox:AddToggle("BlueBoosterToggle", {
+    Text = "Auto Blue Booster",
+    Default = false,
+    Callback = function(Value)
+        blueBoosterEnabled = Value
+        if Value then
             useBlueBooster()
+        end
+    end
+})
+
+-- Red Booster
+local RedBoosterGroupbox = ToysTab:AddRightGroupbox("Red Booster")
+local RedBoosterToggle = RedBoosterGroupbox:AddToggle("RedBoosterToggle", {
+    Text = "Auto Red Booster",
+    Default = false,
+    Callback = function(Value)
+        redBoosterEnabled = Value
+        if Value then
             useRedBooster()
+        end
+    end
+})
+
+-- Wealth Clock
+local WealthClockGroupbox = ToysTab:AddRightGroupbox("Wealth Clock")
+local WealthClockToggle = WealthClockGroupbox:AddToggle("WealthClockToggle", {
+    Text = "Auto Wealth Clock",
+    Default = false,
+    Callback = function(Value)
+        wealthClockEnabled = Value
+        if Value then
             useWealthClock()
         end
     end
@@ -1115,7 +1251,7 @@ RunService.Heartbeat:Connect(function()
     clearVisitedTokens()
     updatePerformanceStats()
     autoEquipTools()
-    updateAutoToys()
+    updateToys()
     
     -- Update status display
     local statusText = "Idle"
