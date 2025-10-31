@@ -1,4 +1,4 @@
---// Lavender Hub - SMOOTH TWEEN FIXED \\--
+--// Lavender Hub \\--
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -82,6 +82,15 @@ local toggles = {
         memory = 0,
         ping = 0
     }
+}
+
+-- Honey tracking
+local honeyStats = {
+    startHoney = 0,
+    currentHoney = 0,
+    lastHoneyCheck = tick(),
+    honeyMade = 0,
+    hourlyRate = 0
 }
 
 local player = Players.LocalPlayer
@@ -220,7 +229,7 @@ local function autoClaimHive()
         addToConsole("🔄 Claiming " .. hiveName .. "...")
         
         local success, result = pcall(function()
-            local hive = workspace:WaitForChild("Hives"):WaitForChild(hiveName)
+            local hive = workspace:WaitForChild("Hives"):WaitForChild("Hive_" .. i)
             local args = {hive}
             claimRemote:FireServer(unpack(args))
         end)
@@ -291,6 +300,47 @@ local function getCurrentPollen()
         return pollenValue.Value
     end
     return 0
+end
+
+-- Get current honey value
+local function getCurrentHoney()
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        local honey = leaderstats:FindFirstChild("Honey")
+        if honey then
+            return honey.Value
+        end
+    end
+    return 0
+end
+
+-- Update honey statistics
+local function updateHoneyStats()
+    local currentHoney = getCurrentHoney()
+    
+    if honeyStats.startHoney == 0 then
+        honeyStats.startHoney = currentHoney
+        honeyStats.currentHoney = currentHoney
+        honeyStats.lastHoneyCheck = tick()
+        return
+    end
+    
+    if currentHoney > honeyStats.currentHoney then
+        honeyStats.honeyMade = honeyStats.honeyMade + (currentHoney - honeyStats.currentHoney)
+        honeyStats.currentHoney = currentHoney
+        
+        -- Calculate hourly rate
+        local timeElapsed = (tick() - honeyStats.lastHoneyCheck) / 3600 -- Convert to hours
+        if timeElapsed > 0 then
+            honeyStats.hourlyRate = honeyStats.honeyMade / timeElapsed
+        end
+    elseif currentHoney < honeyStats.currentHoney then
+        -- Honey decreased, reset tracking
+        honeyStats.startHoney = currentHoney
+        honeyStats.currentHoney = currentHoney
+        honeyStats.honeyMade = 0
+        honeyStats.lastHoneyCheck = tick()
+    end
 end
 
 -- Auto-detect owned hive
@@ -606,12 +656,14 @@ local function DigLoop()
     digRunning = false
 end
 
--- Fire Collection System
+-- Fire Collection System - OPTIMIZED WITH HEARTBEAT
 local farmFires = false
 local fireCache = {}
 local lastFireCacheUpdate = 0
 local FIRE_CACHE_UPDATE_INTERVAL = 2
 local lastFireTime = 0
+local fireUpdateCooldown = 0
+local isCollectingFire = false
 
 local function updateFireCache()
     fireCache = {}
@@ -653,7 +705,10 @@ local function updateFireCache()
 end
 
 local function getNearestFire()
-    if tick() - lastFireCacheUpdate > FIRE_CACHE_UPDATE_INTERVAL then
+    local currentTime = tick()
+    
+    -- Update cache every 2 seconds using heartbeat timing
+    if currentTime - lastFireCacheUpdate > FIRE_CACHE_UPDATE_INTERVAL then
         updateFireCache()
     end
     
@@ -663,7 +718,7 @@ local function getNearestFire()
     for _, fire in pairs(fireCache) do
         if fire and fire.Parent then
             local distance = (fire.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            if distance < shortestDistance then
+            if distance < shortestDistance and distance <= 30 then
                 shortestDistance = distance
                 closestFire = fire
             end
@@ -679,24 +734,34 @@ local function areFiresNearby()
 end
 
 local function collectFires()
-    if not toggles.autoFarm or toggles.isConverting or not toggles.atField or not farmFires then return end
+    if not toggles.autoFarm or toggles.isConverting or not toggles.atField or not farmFires or isCollectingFire then return end
+    
+    local currentTime = tick()
+    if currentTime - fireUpdateCooldown < 0.1 then return end -- Cooldown to prevent spam
+    fireUpdateCooldown = currentTime
     
     local fire, dist = getNearestFire()
-    if fire and dist <= 30 then
+    if fire and dist <= 30 and tick() - lastFireTime > 1.5 then
+        isCollectingFire = true
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(fire.Position)
             lastFireTime = tick()
+            
+            -- Wait for movement to complete or timeout
             local startTime = tick()
             while (player.Character.HumanoidRootPart.Position - fire.Position).Magnitude > 4 and tick() - startTime < 3 do
                 if not fire.Parent then break end
-                task.wait()
+                RunService.Heartbeat:Wait()
             end
         end
+        isCollectingFire = false
     end
 end
 
--- Token Collection
+-- Token Collection - IMPROVED
+local isCollectingToken = false
+
 local function getNearestToken()
     local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
     if not tokensFolder then return nil end
@@ -718,22 +783,24 @@ local function areTokensNearby()
 end
 
 local function collectTokens()
-    if not toggles.autoFarm or toggles.isConverting or not toggles.atField then return end
+    if not toggles.autoFarm or toggles.isConverting or not toggles.atField or isCollectingToken then return end
     
     local token = getNearestToken()
     if token then
+        isCollectingToken = true
         local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
         if humanoid then
             humanoid:MoveTo(token.Position)
             local startTime = tick()
             while (player.Character.HumanoidRootPart.Position - token.Position).Magnitude > 4 and tick() - startTime < 3 do
                 if not token.Parent then break end
-                task.wait()
+                RunService.Heartbeat:Wait()
             end
             if token.Parent then
                 toggles.visitedTokens[token] = true
             end
         end
+        isCollectingToken = false
     end
 end
 
@@ -972,8 +1039,8 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub - SMOOTH",
-    Footer = "v1.0 - Fixed Tween",
+    Title = "Lavender Hub",
+    Footer = "v0.4 (Davi is a sigma)",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -1184,7 +1251,7 @@ local WealthClockToggle = WealthClockGroupbox:AddToggle("WealthClockToggle", {
 -- Console Tab
 local ConsoleTab = Window:AddTab("Console", "terminal")
 local ConsoleGroupbox = ConsoleTab:AddLeftGroupbox("Output")
-consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v1.0 - Fixed Tween Ready", DoesWrap = true })
+consoleLabel = ConsoleGroupbox:AddLabel({ Text = "Lavender Hub v0.4 Ready", DoesWrap = true })
 
 -- Debug Tab
 local DebugTab = Window:AddTab("Debug", "bug")
@@ -1192,6 +1259,10 @@ local DebugGroupbox = DebugTab:AddLeftGroupbox("Performance Stats")
 debugLabels.fps = DebugGroupbox:AddLabel("FPS: 0")
 debugLabels.memory = DebugGroupbox:AddLabel("Memory: 0 MB")
 debugLabels.objects = DebugGroupbox:AddLabel("Objects Deleted: 0")
+
+local HoneyStatsGroupbox = DebugTab:AddRightGroupbox("Honey Statistics")
+local HoneyMadeLabel = HoneyStatsGroupbox:AddLabel("Honey Made: 0")
+local HourlyRateLabel = HoneyStatsGroupbox:AddLabel("Hourly Rate: 0")
 
 local DebugActionsGroupbox = DebugTab:AddRightGroupbox("Actions")
 DebugActionsGroupbox:AddButton("Run Anti-Lag", function()
@@ -1222,6 +1293,7 @@ end)
 local StatusGroupbox = MainTab:AddRightGroupbox("Status")
 local StatusLabel = StatusGroupbox:AddLabel("Status: Idle")
 local PollenLabel = StatusGroupbox:AddLabel("Pollen: 0")
+local HourlyHoneyLabel = StatusGroupbox:AddLabel("Hourly Honey: 0")
 
 -- UI Settings Tab
 local UISettingsTab = Window:AddTab("UI Settings", "settings")
@@ -1252,6 +1324,7 @@ RunService.Heartbeat:Connect(function()
     updatePerformanceStats()
     autoEquipTools()
     updateToys()
+    updateHoneyStats()
     
     -- Update status display
     local statusText = "Idle"
@@ -1271,6 +1344,11 @@ RunService.Heartbeat:Connect(function()
     
     StatusLabel:SetText("Status: " .. statusText)
     PollenLabel:SetText("Pollen: " .. formatNumber(currentPollen))
+    HourlyHoneyLabel:SetText("Hourly Honey: " .. formatNumber(honeyStats.hourlyRate))
+    
+    -- Update debug labels
+    HoneyMadeLabel:SetText("Honey Made: " .. formatNumber(honeyStats.honeyMade))
+    HourlyRateLabel:SetText("Hourly Rate: " .. formatNumber(honeyStats.hourlyRate))
 end)
 
 -- Stats Update Loop
@@ -1279,14 +1357,15 @@ spawn(function()
         local currentPollen = getCurrentPollen()
         
         WrappedLabel:SetText(string.format(
-            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nAnti-Lag: %s",
+            "Pollen: %s\nField: %s\nHive: %s\nMove: %s\nDig: %s\nEquip: %s\nAnti-Lag: %s\nHourly Honey: %s",
             formatNumber(currentPollen),
             toggles.field,
             displayHiveName,
             toggles.movementMethod,
             toggles.autoDig and "ON" or "OFF",
             toggles.autoEquip and "ON" or "OFF",
-            toggles.antiLag and "ON" or "OFF"
+            toggles.antiLag and "ON" or "OFF",
+            formatNumber(honeyStats.hourlyRate)
         ))
     end
 end)
@@ -1306,7 +1385,7 @@ WalkspeedToggle:Set(toggles.walkspeedEnabled)
 WalkspeedSlider:Set(toggles.walkspeed)
 
 -- AUTO CLAIM ALL HIVES ON STARTUP
-addToConsole("🚀 Lavender Hub v1.0 - Fixed Tween Starting...")
+addToConsole("🚀 Lavender Hub v0.4 Starting...")
 addToConsole("🔄 Auto-claiming hives...")
 autoClaimHive()
 
@@ -1316,13 +1395,17 @@ task.wait(3)
 ownedHive = getOwnedHive()
 displayHiveName = ownedHive and "Hive" or "None"
 
+-- Initialize honey tracking
+honeyStats.startHoney = getCurrentHoney()
+honeyStats.currentHoney = honeyStats.startHoney
+
 -- Run anti-lag on startup if enabled
 if toggles.antiLag then
     addToConsole("Running startup Anti-Lag...")
     runAntiLag()
 end
 
-addToConsole("✅ Smooth Tween System Ready!")
+addToConsole("✅ Lavender Hub Ready!")
 addToConsole("🎯 Auto Farm System Ready!")
 if ownedHive then
     addToConsole("🏠 Owned Hive: " .. ownedHive)
