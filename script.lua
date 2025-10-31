@@ -808,14 +808,83 @@ local function clearVisitedTokens()
     end
 end
 
+-- Auto Toys System
+local autoToysEnabled = false
+local lastMountainBoosterTime = 0
+local lastBlueBoosterTime = 0
+local lastRedBoosterTime = 0
+local lastWealthClockTime = 0
+
+local function useMountainBooster()
+    local args = {
+        "Mountain Booster",
+        25
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
+    lastMountainBoosterTime = tick()
+end
+
+local function useBlueBooster()
+    local args = {
+        "Blue Booster",
+        15
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
+    lastBlueBoosterTime = tick()
+end
+
+local function useRedBooster()
+    local args = {
+        "Red Booster",
+        0
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
+    lastRedBoosterTime = tick()
+end
+
+local function useWealthClock()
+    local args = {
+        "Ticket Dispenser",
+        0
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("UseMachine"):FireServer(unpack(args))
+    lastWealthClockTime = tick()
+end
+
+local function updateAutoToys()
+    if not autoToysEnabled then return end
+    
+    local currentTime = tick()
+    
+    -- Mountain Booster every 30 minutes
+    if currentTime - lastMountainBoosterTime >= 1800 then
+        useMountainBooster()
+    end
+    
+    -- Blue Booster every 30 minutes
+    if currentTime - lastBlueBoosterTime >= 1800 then
+        useBlueBooster()
+    end
+    
+    -- Red Booster every 30 minutes
+    if currentTime - lastRedBoosterTime >= 1800 then
+        useRedBooster()
+    end
+    
+    -- Wealth Clock every hour
+    if currentTime - lastWealthClockTime >= 3600 then
+        useWealthClock()
+    end
+end
+
 -- GUI Setup
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Lavender Hub",
-    Footer = "v0.3 (davi is not a femboy)",
+    Title = "Lavender Hub - SMOOTH",
+    Footer = "v1.0 - Fixed Tween",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -886,7 +955,6 @@ local AutoEquipToggle = FarmingGroupbox:AddToggle("AutoEquipToggle", {
         end
     end
 })
-
 -- Movement Settings
 local MovementGroupbox = MainTab:AddRightGroupbox("Movement")
 local MovementMethodDropdown = MovementGroupbox:AddDropdown("MovementMethod", {
@@ -955,6 +1023,24 @@ local AntiLagToggle = AntiLagGroupbox:AddToggle("AntiLagToggle", {
             runAntiLag()
         else
             addToConsole("Anti-Lag disabled")
+        end
+    end
+})
+
+-- Toys Tab
+local ToysTab = Window:AddTab("Toys", "gift")
+local ToysGroupbox = ToysTab:AddLeftGroupbox("Auto Toys")
+
+local AutoToysToggle = ToysGroupbox:AddToggle("AutoToysToggle", {
+    Text = "Auto Toys",
+    Default = false,
+    Callback = function(Value)
+        autoToysEnabled = Value
+        if Value then
+            useMountainBooster()
+            useBlueBooster()
+            useRedBooster()
+            useWealthClock()
         end
     end
 })
@@ -1028,7 +1114,8 @@ RunService.Heartbeat:Connect(function()
     updateWalkspeed()
     clearVisitedTokens()
     updatePerformanceStats()
-    autoEquipTools() -- Added auto equip tools here
+    autoEquipTools()
+    updateAutoToys()
     
     -- Update status display
     local statusText = "Idle"
